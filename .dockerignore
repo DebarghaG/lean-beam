@@ -1,0 +1,13 @@
+.git
+.lake
+.beam
+.codex-worktrees
+.codex
+.agents
+**/__pycache__
+**/*.pyc
+**/.beam
+**/.lake
+build
+_eval
+_opam

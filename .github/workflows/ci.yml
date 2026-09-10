@@ -82,6 +82,12 @@ jobs:
       - name: Beam Fast Test
         run: bash tests/test-beam-fast.sh
 
+      - name: Lean Worker Pool
+        if: runner.os == 'Linux'
+        run: |
+          python3 tests/test-beam-pool.py
+          python3 tests/test-beam-pool-integration.py
+
   mcp-conformance:
     name: mcp-conformance (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

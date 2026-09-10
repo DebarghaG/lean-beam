@@ -1,0 +1,39 @@
+name: beam-pool
+services:
+  worker:
+    image: beam-pool:local
+    init: true
+    cpus: 1
+    mem_limit: 2g
+    pids_limit: 256
+    environment:
+      BEAM_POOL_TOKEN: ${BEAM_POOL_TOKEN:?Set a random shared capability}
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, python3, -m, scripts.beam_pool, health]
+      interval: 10s
+      timeout: 3s
+      start_period: 120s
+    networks: [pool]
+  gateway:
+    image: beam-pool:local
+    init: true
+    command: [serve, --worker-dns, worker:9001, --listen, '0.0.0.0:9000']
+    cpus: 1
+    mem_limit: 512m
+    environment:
+      BEAM_POOL_TOKEN: ${BEAM_POOL_TOKEN:?Set a random shared capability}
+    ports: ['127.0.0.1:9000:9000']
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, python3, -m, scripts.beam_pool, health, --endpoint, '127.0.0.1:9000']
+      interval: 10s
+      timeout: 3s
+      start_period: 120s
+    networks: [pool, client]
+networks:
+  pool:
+    internal: true
+  client: {}

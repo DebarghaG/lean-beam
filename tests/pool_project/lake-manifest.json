@@ -1,0 +1,6 @@
+{"version": "1.2.0",
+ "packagesDir": ".lake/packages",
+ "packages": [],
+ "name": "beam_pool_workloads",
+ "lakeDir": ".lake",
+ "fixedToolchain": false}

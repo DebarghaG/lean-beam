@@ -12,6 +12,8 @@ Lean Beam setup has two separate locations:
 You do not add Lean Beam to the target project's `lakefile`, and you do not install a copy into each
 project. The wrapper detects the target project root from the current directory or `--root`.
 
+For optional execution across workers, see [Worker pool](WORKER_POOL.md).
+
 ## Install Beam From This Checkout
 
 The current public distribution path starts from a Lean Beam source checkout. To install a specific

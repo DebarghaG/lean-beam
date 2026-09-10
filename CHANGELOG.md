@@ -8,6 +8,7 @@ This project keeps a lightweight, reverse-chronological changelog. Dates use `YY
 
 ### Added
 
+- Optional Lean worker pools use the existing CLI/MCP requests and continuation handles.
 - Additive retained-handle MCP tools advertise `destructiveHint = false`, while workspace eviction
   and document close advertise `idempotentHint = true` without being classified as read-only.
 - Ten additional observational MCP tools advertise the read-only hint, covering server inspection,

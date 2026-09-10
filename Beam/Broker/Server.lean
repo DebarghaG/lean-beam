@@ -17,6 +17,7 @@ import Beam.Broker.Errors
 import Beam.Broker.Metrics
 import Beam.Broker.OpenDocs
 import Beam.Broker.Pending
+import Beam.Broker.Pool
 import Beam.Broker.Protocol
 import Beam.Broker.Transport
 import Beam.Broker.Lean
@@ -69,6 +70,7 @@ structure Session where
   nextEventSeq : Nat := 1
   moduleHistory : Std.TreeMap String ModuleHistory := {}
   docs : Std.TreeMap String DocState := {}
+  poolDocumentGenerations : Std.TreeMap String Nat := {}
 
 structure BackendState where
   nextEpoch : Nat := 1
@@ -890,7 +892,10 @@ private def closeFile (session : Session) (path : System.FilePath) : IO Session 
   else
     let param := toJson ({ textDocument := { uri := uri } : DidCloseTextDocumentParams })
     let session ← sendNotificationJson session "textDocument/didClose" param
-    pure { session with docs := session.docs.erase uri }
+    pure { session with
+      docs := session.docs.erase uri
+      poolDocumentGenerations := session.poolDocumentGenerations.insert uri
+        ((session.poolDocumentGenerations.get? uri).getD 0 + 1) }
 
 private def recordFileProgress (session : Session) (uri : DocumentUri)
     (fileProgress? : Option SyncFileProgress) : Session :=
@@ -2194,6 +2199,131 @@ private def runAtSetupProgressEmitter?
     if isLakeSetupFileProgressStreamDiagnostic diagnostic then
       emitDiagnostic diagnostic
 
+private structure PreparedPoolRequest where
+  session : Session
+  version : Nat
+  documentGeneration : Nat
+
+private def requestPoolBinding?
+    (server : ServerRuntime) (req : BackendWorkspaceRequest) : HandlerM (Option Pool.Binding) := do
+  if req.backend != .lean then return none
+  let some root ← liftHandlerIO <| server.workspaceRoot? req.workspaceId
+    | throw <| requestWorkspaceChangedFailure req.toWorkspaceRequest
+  liftFailureIO <| Pool.bindingFor root
+
+private def preparePoolRequest
+    (server : ServerRuntime) (req : BackendWorkspaceRequest) (snapshot : FileSyncSnapshot)
+    (expectedVersion? : Option Nat) (handle? : Option Handle := none) :
+    HandlerM PreparedPoolRequest := do
+  liftFailureIO <| server.withRequestBackendState req do
+    withSessionForSnapshot req.workspaceId req.backend snapshot fun session => do
+      if let some handle := handle? then
+        if let .error failure := unwrapHandle session handle then
+          return .error failure.toResponseFailure
+      let session ← syncFileSnapshot session snapshot
+      updateSession session
+      let doc ← requireDocState session snapshot.uri
+      if let some expected := expectedVersion? then
+        if doc.version != expected then
+          return .error <| documentVersionMismatchFailure expected doc.version snapshot.uri
+      if doc.textHash != snapshot.file.textHash then
+        return .error <| responseFailureFor .contentModified "source snapshot was superseded"
+      return .ok { session
+                   version := doc.version
+                   documentGeneration := (session.poolDocumentGenerations.get? snapshot.uri).getD 0 }
+
+private def validatePoolRequest
+    (server : ServerRuntime) (prepared : PreparedPoolRequest) (snapshot : FileSyncSnapshot)
+    (binding : Pool.Binding) (cancelRef? : Option (IO.Ref Bool)) : HandlerM Unit := do
+  liftFailureIO <| ensureRequestNotCancelled cancelRef?
+  liftFailureIO <| Pool.checkInputs binding snapshot.path
+  let sourceMatches ← liftHandlerIO do
+    try pure ((← IO.FS.readFile snapshot.path) == snapshot.text)
+    catch _ => pure false
+  unless sourceMatches do
+    throw <| responseFailureFor .contentModified "source changed during pool execution"
+  let valid ← withCurrentMatchingSession server prepared.session fun current => do
+    return (current.docs.get? snapshot.uri).any fun doc =>
+      doc.version == prepared.version && doc.textHash == snapshot.file.textHash &&
+      (current.poolDocumentGenerations.get? snapshot.uri).getD 0 == prepared.documentGeneration
+  unless valid do throw <| responseFailureFor .contentModified "pool source is no longer current"
+
+private def executePoolRequest
+    (server : ServerRuntime) (binding : Pool.Binding)
+    (snapshot : FileSyncSnapshot) (prepared : PreparedPoolRequest) (op : String) (args : Json)
+    (storeHandle : Bool) (cancelRef? : Option (IO.Ref Bool)) : HandlerM Response := do
+  validatePoolRequest server prepared snapshot binding cancelRef?
+  let group := prepared.session.sessionToken
+  let reply ← liftFailureIO <| Pool.request binding op
+    (args.setObjVal! "group" (toJson group)) cancelRef?
+  if op == "release" then
+    validatePoolRequest server prepared snapshot binding cancelRef?
+    let result ← requestArg <| match reply.getObjVal? "result" with
+      | .ok value => .ok value
+      | .error _ => .error <| responseFailureFor .internalError "pool release lacks result"
+    return Response.success result
+  let result ← requestArg <| Pool.result reply
+  let id? := (result.getObjValAs? String "handle").toOption
+  let validation ← liftHandlerIO <| (validatePoolRequest server prepared snapshot binding cancelRef?).run
+  if !validation.isOk || !storeHandle then
+    if let some id := id? then
+      discard <| liftHandlerIO <| Pool.request binding "release"
+        (Json.mkObj [("handle", toJson id), ("group", toJson group)]) none 3000
+  requestArg validation
+  let result := match id? with
+    | some id =>
+        if storeHandle then
+          let handle : Pool.Handle := {
+            binding := binding.binding
+            path := snapshot.path.toString
+            version := prepared.version
+            documentGeneration := prepared.documentGeneration
+            id
+          }
+          result.setObjVal! "handle" (wrapHandle prepared.session (toJson handle))
+        else match result with
+          | .obj fields => .obj (fields.erase "handle")
+          | other => other
+    | none => result
+  return Response.success result
+
+private def handlePoolRunAt
+    (server : ServerRuntime) (req : BackendWorkspaceRequest) (request : RunAtRequest)
+    (binding : Pool.Binding) (cancelRef? : Option (IO.Ref Bool)) : HandlerM Response := do
+  let snapshot ← liftFailureIO <| readRequestSyncSnapshot server req request.path
+  let prepared ← preparePoolRequest server req snapshot (some request.version)
+  let path := Beam.pathRelativeToRootOrUri prepared.session.root snapshot.uri
+  executePoolRequest server binding snapshot prepared "runAt" (Json.mkObj [
+    ("snapshot", toJson binding.snapshot), ("path", toJson path),
+    ("line", toJson request.line), ("character", toJson request.character),
+    ("text", toJson request.text), ("source", toJson snapshot.text),
+    ("store", toJson (request.storeHandle?.getD false))])
+    (request.storeHandle?.getD false) cancelRef?
+
+private def handlePoolContinuation
+    (server : ServerRuntime) (req : BackendWorkspaceRequest) (path : String) (outer : Handle)
+    (text? : Option String) (linear storeHandle : Bool) (cancelRef? : Option (IO.Ref Bool)) :
+    HandlerM Response := do
+  let some binding ← requestPoolBinding? server req
+    | throw <| responseFailureFor .contentModified "pool binding is no longer configured"
+  let handle ← requestArg <| match fromJson? (α := Pool.Handle) outer.raw with
+    | .ok handle => .ok handle
+    | .error _ => .error <| responseFailureFor .invalidParams "invalid pool continuation handle"
+  unless handle.binding == binding.binding do
+    throw <| responseFailureFor .contentModified "pool binding changed"
+  let snapshot ← liftFailureIO <| readRequestSyncSnapshot server req path
+  unless handle.path == snapshot.path.toString do
+    throw <| responseFailureFor .invalidParams "handle belongs to a different document"
+  let prepared ← preparePoolRequest server req snapshot (some handle.version) (some outer)
+  unless prepared.documentGeneration == handle.documentGeneration do
+    throw <| responseFailureFor .contentModified "handle belongs to a closed document"
+  let args := Json.mkObj <| [("handle", toJson handle.id)] ++
+    match text? with
+    | some text => [("text", toJson text), ("linear", toJson linear), ("source", toJson snapshot.text)]
+    | none => []
+  executePoolRequest server binding snapshot prepared
+    (if text?.isSome then "runWith" else "release") args storeHandle cancelRef?
+
 private def handleRunAtOp
     (server : ServerRuntime)
     (req : BackendWorkspaceRequest)
@@ -2202,6 +2332,8 @@ private def handleRunAtOp
     (emitProgress? : Option (SyncFileProgress → IO Unit) := none)
     (emitDiagnostic? : Option (StreamDiagnostic → IO Unit) := none) :
     HandlerM Response := do
+  if let some binding ← requestPoolBinding? server req then
+    return ← handlePoolRunAt server req request binding cancelRef?
   let method ← requestMethod <| runAtMethod request.backend
   let path := System.FilePath.mk request.path
   liftFailureIO <| ensureRequestNotCancelled cancelRef?
@@ -2498,6 +2630,9 @@ private def handleRunWithOp
     (cancelRef? : Option (IO.Ref Bool) := none)
     (emitProgress? : Option (SyncFileProgress → IO Unit) := none) :
     HandlerM Response := do
+  if req.backend == .lean && Pool.isHandle request.handle.raw then
+    return ← handlePoolContinuation server req request.path request.handle (some request.text)
+      (request.linear?.getD false) (request.storeHandle?.getD true) cancelRef?
   let method ← requestMethod <| runWithMethod request.handle.backend
   liftFailureIO <| ensureRequestNotCancelled cancelRef?
   let snapshot ← liftFailureIO <|
@@ -2535,6 +2670,8 @@ private def handleReleaseOp
     (cancelRef? : Option (IO.Ref Bool) := none)
     (emitProgress? : Option (SyncFileProgress → IO Unit) := none) :
     HandlerM Response := do
+  if req.backend == .lean && Pool.isHandle request.handle.raw then
+    return ← handlePoolContinuation server req request.path request.handle none false false cancelRef?
   let method ← requestMethod <| releaseMethod request.handle.backend
   liftFailureIO <| ensureRequestNotCancelled cancelRef?
   let snapshot ← liftFailureIO <|
