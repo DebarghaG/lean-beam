@@ -22,8 +22,9 @@ class Pending:
 
 
 class Mcp:
-    def __init__(self, command: list[str], root: str, threads: int):
+    def __init__(self, command: list[str], root: str, threads: int, *, drain_on_cancel: bool = False):
         self.command, self.root, self.threads = command, root, threads
+        self.drain_on_cancel = drain_on_cancel
         self.proc = None
         self.pending: dict[str, Pending] = {}
         self.write_lock = asyncio.Lock()
@@ -36,6 +37,7 @@ class Mcp:
         env = dict(os.environ, LEAN_NUM_THREADS=str(self.threads))
         # Workers execute locally; inheriting the client binding would recursively route back.
         env.pop("BEAM_LEAN_POOL_CONFIG", None)
+        env.pop("BEAM_POOL_TOKEN", None)
         self.proc = await asyncio.create_subprocess_exec(
             *self.command, cwd=self.root, env=env, start_new_session=True,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
@@ -92,6 +94,7 @@ class Mcp:
     async def call(self, name: str, args: dict, emit: Emit | None = None) -> dict:
         identity = uuid.uuid4().hex
         pending = Pending(asyncio.get_running_loop().create_future(), asyncio.Queue(maxsize=8))
+        pending.result.add_done_callback(lambda f: f.exception() if not f.cancelled() else None)
         self.pending[identity] = pending
 
         async def forward() -> None:
@@ -102,13 +105,22 @@ class Mcp:
 
         pump = asyncio.create_task(forward())
         try:
-            await self.send({"jsonrpc": "2.0", "id": identity, "method": "tools/call", "params": {
-                "name": name, "arguments": args, "_meta": {
-                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-                    "io.modelcontextprotocol/clientCapabilities": {},
-                    "io.modelcontextprotocol/clientInfo": {"name": "beam-pool", "version": "1"},
-                    "progressToken": identity}}})
-            message = await pending.result
+            try:
+                await self.send({"jsonrpc": "2.0", "id": identity, "method": "tools/call", "params": {
+                    "name": name, "arguments": args, "_meta": {
+                        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                        "io.modelcontextprotocol/clientCapabilities": {},
+                        "io.modelcontextprotocol/clientInfo": {"name": "beam-pool", "version": "1"},
+                        "progressToken": identity}}})
+                message = await asyncio.shield(pending.result)
+            except asyncio.CancelledError:
+                with contextlib.suppress(ConnectionError, Failure):
+                    await self.send({"jsonrpc": "2.0", "method": "notifications/cancelled",
+                                     "params": {"requestId": identity, "reason": "pool request ended"}})
+                if not self.drain_on_cancel:
+                    raise
+                # Only used with --respond-to-cancellation; Worker bounds the drain lifetime.
+                message = await asyncio.shield(pending.result)
             if "error" in message:
                 error = message["error"]
                 raise Failure("mcpError", error["message"], error)
@@ -121,17 +133,12 @@ class Mcp:
                 raise Failure(str(error.get("code", "mcpError")),
                               str(error.get("message", "MCP tool failed")), structured)
             return structured
-        except asyncio.CancelledError:
-            # Modern MCP suppresses the final response when cancellation wins. The owner must
-            # retire this process before admitting more work; it cannot infer drain from silence.
-            with contextlib.suppress(ConnectionError, Failure):
-                await self.send({"jsonrpc": "2.0", "method": "notifications/cancelled",
-                                 "params": {"requestId": identity, "reason": "pool request ended"}})
-            raise
         finally:
             self.pending.pop(identity, None)
             pump.cancel()
-            await asyncio.gather(pump, return_exceptions=True)
+            # A cancellation racing a completed response must not lose its retained handle.
+            with contextlib.suppress(asyncio.CancelledError):
+                await asyncio.gather(pump, return_exceptions=True)
 
     async def close(self, grace: float = 3) -> None:
         if self.closed:

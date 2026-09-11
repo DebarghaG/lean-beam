@@ -34,6 +34,8 @@ This project keeps a lightweight, reverse-chronological changelog. Dates use `YY
 
 ### Changed
 
+- Worker pools preserve queued continuation handles and drain cancelled requests before restarting
+  a worker, so cooperative cancellation preserves other clients' handles.
 - Clarify zero-based `run-at` coordinates and how tactic positions select before/after proof states,
   with guidance for probing tactic replacements
   ([#253](https://github.com/leanprover/lean-beam/pull/253), @ejgallego).

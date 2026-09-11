@@ -54,8 +54,22 @@ async def write_frame(writer: asyncio.StreamWriter, value: dict) -> None:
 
 async def rpc(endpoint: tuple[str, int], token: str, op: str, args: dict,
               emit: Emit | None = None, timeout: float = 120) -> dict:
-    writer = None
+    reader = writer = None
     identity = uuid.uuid4().hex
+
+    async def cancel_remote() -> None:
+        if writer is None or op in {"info", "describe"}:
+            return
+        try:
+            # Half-close requests cancellation. The server closes its side after the job drains,
+            # so the pool keeps the worker's admission slot until cleanup has finished.
+            writer.write_eof()
+            async with asyncio.timeout(5):
+                while await reader.read(65536):
+                    pass
+        except (OSError, TimeoutError) as error:
+            raise Failure("workerLost", "worker did not finish cancellation") from error
+
     try:
         async with asyncio.timeout(timeout):
             reader, writer = await asyncio.open_connection(*endpoint, limit=MAX_FRAME)
@@ -80,7 +94,11 @@ async def rpc(endpoint: tuple[str, int], token: str, op: str, args: dict,
                     raise Failure.decode(frame["error"])
                 raise Failure("protocolError", "invalid response envelope")
     except TimeoutError as error:
+        await cancel_remote()
         raise Failure("deadlineExceeded", "request deadline exceeded") from error
+    except asyncio.CancelledError:
+        await cancel_remote()
+        raise
     except (ConnectionError, OSError) as error:
         raise Failure("workerLost", "cannot reach worker") from error
     finally:
@@ -110,6 +128,9 @@ class RpcServer:
         await asyncio.gather(*self.tasks, return_exceptions=True)
 
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        if len(self.tasks) >= self.max_connections:
+            writer.close()
+            return
         owner = asyncio.current_task()
         self.tasks.add(owner)
         job = watch = None
@@ -132,8 +153,6 @@ class RpcServer:
                 raise Failure("invalidParams", "unsupported protocol version or empty request id")
             if not hmac.compare_digest(string(frame, "token", 1024).encode(), self.token.encode()):
                 raise Failure("unauthorized", "invalid pool capability")
-            if len(self.tasks) > self.max_connections:
-                raise Failure("overloaded", "connection limit reached")
             if not isinstance(frame["args"], dict):
                 raise Failure("invalidParams", "args must be an object")
             job = asyncio.create_task(self.dispatch(string(frame, "op", 32), frame["args"], emit))

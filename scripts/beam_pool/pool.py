@@ -29,6 +29,7 @@ class Handle:
     path: str
     touched: float = field(default_factory=time.monotonic)
     users: int = 0
+    consuming: bool = False
 
 
 @dataclass(eq=False)
@@ -39,6 +40,8 @@ class Job:
     result: asyncio.Future
     emit: Emit
     handle: Handle | None = None
+    consumes: bool = False
+    reservation: int = 0
     created: float = field(default_factory=time.monotonic)
     task: asyncio.Task | None = None
 
@@ -61,10 +64,12 @@ class Pool:
         self.background: list[asyncio.Task] = []
         self.closing = False
         self.cursor = 0
+        self.expiry_lock = asyncio.Lock()
 
     async def start(self) -> None:
         await self.discover()
-        self.background = [asyncio.create_task(self.discovery_loop()), asyncio.create_task(self.schedule())]
+        self.background = [asyncio.create_task(self.discovery_loop()), asyncio.create_task(self.schedule()),
+                           asyncio.create_task(self.expiry_loop())]
 
     async def close(self) -> None:
         self.closing = True
@@ -92,10 +97,11 @@ class Pool:
                 endpoints.update((r[4][0], self.dns[1]) for r in records)
             except OSError:
                 pass
+        owners = {id(handle.peer) for handle in self.handles.values()}
         for endpoint, peer in list(self.peers.items()):
             if endpoint not in endpoints:
                 peer.info["ready"] = False
-                if not peer.busy:
+                if not peer.busy and id(peer) not in owners:
                     del self.peers[endpoint]
 
         async def update(endpoint: tuple[str, int]) -> None:
@@ -119,26 +125,50 @@ class Pool:
         while True:
             await asyncio.sleep(1)
             await self.discover()
+
+    async def expiry_loop(self) -> None:
+        while True:
+            await asyncio.sleep(1)
             await self.expire_handles()
 
     async def expire_handles(self) -> None:
-        now = time.monotonic()
-        for identity, handle in list(self.handles.items()):
-            if handle.users == 0 and now - handle.touched > self.handle_ttl:
-                if handle.peer.busy >= handle.peer.info.get("slots", 1):
+        async def expire_on_peer(entries: list[tuple[str, Handle]]) -> None:
+            for identity, handle in entries:
+                if self.handles.get(identity) is not handle or handle.users:
                     continue
-                handle.peer.busy += 1
+                peer = handle.peer
+                if peer.info.get("generation") != handle.generation:
+                    self.handles.pop(identity, None)
+                    continue
+                if time.monotonic() - handle.touched <= self.handle_ttl:
+                    continue
+                if not peer.info.get("ready"):
+                    self.handles.pop(identity, None)
+                    continue
+                if peer.busy >= peer.info.get("slots", 1):
+                    break
+                peer.busy += 1
+                handle.users += 1
                 try:
-                    await rpc(handle.peer.endpoint, self.token, "release", {
+                    await rpc(peer.endpoint, self.token, "release", {
                         "snapshot": handle.snapshot, "generation": handle.generation,
                         "path": handle.path, "handle": handle.raw}, timeout=5)
                 except Failure as error:
                     if error.code == "overloaded":
-                        continue
+                        break
+                    if error.code in {"workerLost", "deadlineExceeded"}:
+                        peer.info["ready"] = False
                 finally:
-                    handle.peer.busy -= 1
+                    handle.users -= 1
+                    peer.busy -= 1
                     self.wakeup.set()
                 self.handles.pop(identity, None)
+
+        async with self.expiry_lock:
+            by_peer: dict[int, list[tuple[str, Handle]]] = {}
+            for identity, handle in self.handles.items():
+                by_peer.setdefault(id(handle.peer), []).append((identity, handle))
+            await asyncio.gather(*(expire_on_peer(entries) for entries in by_peer.values()))
 
     def get_handle(self, value: str) -> Handle:
         handle = self.handles.get(value)
@@ -181,7 +211,7 @@ class Pool:
             if op == "runWith":
                 string(args, "text")
                 boolean(args, "linear")
-            if (op == "release" or args.get("linear", False)) and handle.users:
+            if handle.consuming or ((op == "release" or args.get("linear", False)) and handle.users):
                 raise Failure("handleBusy", "consuming or releasing a handle requires its readers to finish")
         else:
             raise Failure("invalidParams", "unknown pool operation")
@@ -193,21 +223,22 @@ class Pool:
         if self.queued >= self.max_queue or self.groups.get(group, 0) >= self.per_group:
             raise Failure("overloaded", "pool queue or agent-group budget reached")
         storing = op == "runWith" or args.get("store", False)
-        if storing and len(self.handles) + self.reserved_handles - int(
-                op == "runWith" and args.get("linear", False)) >= self.max_handles:
+        consumes = op == "release" or (op == "runWith" and args["linear"])
+        reservation = int(storing and not consumes)
+        if storing and len(self.handles) + self.reserved_handles + reservation > self.max_handles:
             raise Failure("resourceExhausted", "pool handle budget reached; release branches")
         if handle:
             handle.users += 1
-            if op == "release" or args.get("linear", False):
-                del self.handles[args["handle"]]
-        job = Job(op, args, group, asyncio.get_running_loop().create_future(), emit, handle)
+            handle.consuming = consumes
+        job = Job(op, args, group, asyncio.get_running_loop().create_future(), emit,
+                  handle, consumes, reservation)
         # Observe failures after the requesting connection has gone away.
         job.result.add_done_callback(lambda f: f.exception() if not f.cancelled() else None)
         self.jobs.add(job)
         self.queues.setdefault(group, deque()).append(job)
         self.groups[group] = self.groups.get(group, 0) + 1
         self.queued += 1
-        self.reserved_handles += int(storing)
+        self.reserved_handles += reservation
         self.wakeup.set()
         return await self.wait_job(job)
 
@@ -300,9 +331,11 @@ class Pool:
         self.groups[job.group] -= 1
         if not self.groups[job.group]:
             del self.groups[job.group]
-        self.reserved_handles -= int(job.op == "runWith" or job.args.get("store", False))
+        self.reserved_handles -= job.reservation
         if job.handle:
             job.handle.users -= 1
+            if job.consumes:
+                job.handle.consuming = False
 
     async def execute(self, job: Job, peer: Peer) -> None:
         generation = peer.info["generation"]
@@ -316,7 +349,7 @@ class Pool:
             reply = await rpc(peer.endpoint, self.token, op, common | args, job.emit,
                               timeout=max(0.001, self.timeout - (time.monotonic() - job.created)))
             fields(reply, {"generation", "result"})
-            if reply["generation"] != generation:
+            if reply["generation"] != generation or peer.info.get("generation") != generation:
                 raise Failure("contentModified", "worker changed during request")
             return reply["result"]
 
@@ -330,6 +363,8 @@ class Pool:
             elif job.op == "release":
                 result = await call("release", {"handle": job.handle.raw})
             result = dict(result)
+            if job.consumes:
+                self.handles.pop(job.args["handle"], None)
             result.pop("workspace", None)
             raw = result.get("next_handle")
             if raw is not None:
@@ -345,7 +380,8 @@ class Pool:
             self.failed += 1
             raise
         except Failure as error:
-            if error.code in {"workerLost", "deadlineExceeded", "contentModified"}:
+            # RPC deadlines also wait for drain; only an uncertain transport retires the peer.
+            if error.code == "workerLost":
                 peer.info["ready"] = False
             if not job.result.done():
                 job.result.set_exception(error)

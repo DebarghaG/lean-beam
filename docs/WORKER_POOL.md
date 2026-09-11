@@ -4,7 +4,9 @@ Beam can send speculative Lean requests to a pool of workers. Agents keep using 
 commands and continuation handles. Independent requests can use different workers; continuations
 stay with the worker that created them. Sync, navigation, and save still run locally.
 
-This is optional and experimental. Workers need identical, prepared project files and dependencies.
+This is optional and experimental. Build your project and dependencies before copying them to
+workers. Client and worker copies need byte-identical sources and compiled imports, including `.olean`
+files. The example project imports only the Lean standard library, already included in the image.
 The pool scripts require Linux and Python 3.11 or later.
 
 ## Run locally
@@ -61,8 +63,15 @@ The Kubernetes example has not been tested on a live cluster.
   Beam. Requests check document versions, source content, and other prepared files' metadata.
 - Run one gateway. Restarting it loses handles. Removing a worker loses its handles too; there is
   no automatic migration or graceful scale-down controller.
-- Cancellation retires the affected worker. Idle handles expire; explicit release frees them
-  sooner. Closing a local document invalidates its handles, but remote cleanup waits for expiry.
+- Cancellation and timeouts allow three seconds for execution to stop. If it does not, the worker
+  restarts and all clients lose their handles on that worker. Linear handles may be consumed once
+  execution starts. Queued cancellations preserve handles.
+- Idle handles expire; explicit release frees them sooner. Closing a local document invalidates
+  its handles, but remote cleanup waits for expiry.
+- Remote progress and diagnostic events are not streamed. Final results still include messages.
+- Attachment hashes every prepared input twice. Requests check input metadata before and after
+  execution. This cost grows with the project and dependencies; Mathlib-scale latency is unmeasured.
+  Pending socket operations poll with delays that grow from 1 to 10 ms.
 - Transport uses a shared token over plain TCP. Keep it on a trusted private network.
 
 ## Tests
@@ -72,3 +81,5 @@ python3 tests/test-beam-pool.py
 python3 tests/test-beam-pool-integration.py
 python3 tests/test-beam-pool-compose.py  # needs the Docker image and free port 9000
 ```
+
+The CLI integration test caches runtime bundles in the ignored `.beam/pool-integration-bundles`.

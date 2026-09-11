@@ -18,18 +18,11 @@ from .transport import Emit
 
 class Worker:
     def __init__(self, root: Path, mcp: Path, lean: Path, plugin: Path, *, slots: int = 1,
-                 timeout: float = 60, max_handles: int = 4096, idle_ttl: float = 1800):
-        self.snapshot = Snapshot.create(root)
-        # Resolve elan through its supported Lean query, preserving the executable's argv[0].
-        prefix = subprocess.check_output([str(lean), "--print-prefix"], cwd=root, text=True).strip()
-        lean = Path(prefix) / "bin" / "lean"
-        runtime_files = [mcp, mcp.parent / "beam-daemon", lean, plugin,
-                         *sorted((lean.parent.parent / "lib/lean").glob("*.so"))]
-        self.runtime = hashlib.sha256(canonical([digest_file(p) for p in runtime_files])).hexdigest()
-        self.snapshot = replace(self.snapshot, identity=hashlib.sha256(
-            canonical([self.snapshot.identity, self.runtime])).hexdigest())
-        self.command = [str(mcp.resolve()), "--lean-cmd", str(lean.resolve()),
-                        "--lean-plugin", str(plugin.resolve())]
+                 timeout: float = 60, max_handles: int = 4096, idle_ttl: float = 1800,
+                 cancel_grace: float = 3):
+        self.paths = root, mcp, lean, plugin
+        self.prepared = False
+        self.cancel_grace = cancel_grace
         self.slots, self.timeout, self.max_handles = slots, timeout, max_handles
         self.generation = uuid.uuid4().hex
         self.mcp: Mcp | None = None
@@ -44,8 +37,25 @@ class Worker:
         self.idle_ttl, self.last_activity = idle_ttl, time.monotonic()
         self.maintenance = None
 
+    def prepare(self) -> None:
+        root, mcp, lean, plugin = self.paths
+        self.snapshot = Snapshot.create(root)
+        # Resolve elan through its supported Lean query, preserving the executable's argv[0].
+        prefix = subprocess.check_output([str(lean), "--print-prefix"], cwd=root, text=True).strip()
+        lean = Path(prefix) / "bin" / "lean"
+        runtime_files = [mcp, mcp.parent / "beam-daemon", lean, plugin,
+                         *sorted((lean.parent.parent / "lib/lean").glob("*.so"))]
+        self.runtime = hashlib.sha256(canonical([digest_file(p) for p in runtime_files])).hexdigest()
+        self.snapshot = replace(self.snapshot, identity=hashlib.sha256(
+            canonical([self.snapshot.identity, self.runtime])).hexdigest())
+        self.command = [str(mcp.resolve()), "--lean-cmd", str(lean.resolve()),
+                        "--lean-plugin", str(plugin.resolve()), "--respond-to-cancellation"]
+        self.prepared = True
+
     async def start(self) -> None:
-        self.mcp = Mcp(self.command, str(self.snapshot.root), self.slots)
+        if not self.prepared:
+            await asyncio.to_thread(self.prepare)
+        self.mcp = Mcp(self.command, str(self.snapshot.root), self.slots, drain_on_cancel=True)
         await self.mcp.start()
         if self.maintenance is None:
             self.maintenance = asyncio.create_task(self.expire_idle())
@@ -82,6 +92,31 @@ class Worker:
     def begin_recycle(self, old: Mcp) -> None:
         if self.reset_task is None or self.reset_task.done():
             self.reset_task = asyncio.create_task(self.recycle(old))
+
+    async def drain(self, task: asyncio.Task, old: Mcp, path: str) -> None:
+        task.cancel()
+        try:
+            async with asyncio.timeout(self.cancel_grace):
+                try:
+                    reply = await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    if not task.cancelled():
+                        raise
+                    return  # No MCP call remains outstanding.
+                except Failure as error:
+                    if error.code in {"workerLost", "protocolError"}:
+                        raise
+                    return  # A terminal request error also proves completion.
+                raw = reply["result"].get("next_handle")
+                if raw is not None:
+                    release = asyncio.create_task(old.call("lean_release", {
+                        "workspace": {"root": str(self.snapshot.root)}, "path": path, "handle": raw}))
+                    release.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+                    await asyncio.shield(release)
+                    self.handles.pop(canonical(raw), None)
+        except (asyncio.CancelledError, Exception):
+            # Any failed drain leaves execution or handle ownership uncertain.
+            self.begin_recycle(old)
 
     async def sync(self, path: str, emit: Emit) -> int:
         self.snapshot.check_file(path)
@@ -153,35 +188,43 @@ class Worker:
         self.reserved_handles += int(storing)
         old = self.mcp
         generation = self.generation
+
+        async def execute() -> dict:
+            version = await self.sync(path, emit)
+            if asyncio.current_task().cancelling():
+                raise asyncio.CancelledError  # A cancelled sync must not start a tactic afterward.
+            params = {"workspace": {"root": str(self.snapshot.root)}, "path": path}
+            if op == "warm":
+                result = {"version": version}
+            else:
+                if op == "runAt":
+                    name = "lean_run_at_handle" if storing else "lean_run_at"
+                    params.update(version=version, line=args["line"], character=args["character"],
+                                  text=args["text"])
+                elif op == "runWith":
+                    name = "lean_run_with_linear" if args["linear"] else "lean_run_with"
+                    params.update(handle=args["handle"], text=args["text"])
+                else:
+                    name = "lean_release"
+                    params.update(handle=args["handle"])
+                result = await old.call(name, params, emit)
+            self.snapshot.check_file(path)
+            if generation != self.generation:
+                raise Failure("contentModified", "worker was restarted during execution")
+            if op == "release" or (op == "runWith" and args["linear"]):
+                self.handles.pop(key, None)
+            if result.get("next_handle") is not None:
+                self.handles[canonical(result["next_handle"])] = time.monotonic()
+            self.completed += 1
+            return {"generation": generation, "result": result}
+
+        operation = asyncio.create_task(execute())
+        operation.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
         try:
             async with asyncio.timeout(self.timeout):
-                version = await self.sync(path, emit)
-                params = {"workspace": {"root": str(self.snapshot.root)}, "path": path}
-                if op == "warm":
-                    result = {"version": version}
-                else:
-                    if op == "runAt":
-                        name = "lean_run_at_handle" if storing else "lean_run_at"
-                        params.update(version=version, line=args["line"], character=args["character"],
-                                      text=args["text"])
-                    elif op == "runWith":
-                        name = "lean_run_with_linear" if args["linear"] else "lean_run_with"
-                        params.update(handle=args["handle"], text=args["text"])
-                    else:
-                        name = "lean_release"
-                        params.update(handle=args["handle"])
-                    result = await old.call(name, params, emit)
-                self.snapshot.check_file(path)
-                if generation != self.generation:
-                    raise Failure("contentModified", "worker was restarted during execution")
-                if op == "release" or (op == "runWith" and args["linear"]):
-                    self.handles.pop(key, None)
-                if result.get("next_handle") is not None:
-                    self.handles[canonical(result["next_handle"])] = time.monotonic()
-                self.completed += 1
-                return {"generation": generation, "result": result}
+                return await asyncio.shield(operation)
         except (TimeoutError, asyncio.CancelledError) as error:
-            self.begin_recycle(old)
+            await self.drain(operation, old, path)
             self.failures += 1
             if isinstance(error, TimeoutError):
                 raise Failure("deadlineExceeded", "worker execution deadline exceeded") from error

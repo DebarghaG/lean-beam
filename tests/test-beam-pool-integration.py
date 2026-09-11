@@ -279,7 +279,7 @@ class IntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.pool.handles)
         self.assertFalse(any(w.handles for w in self.workers))
 
-    async def test_mcp_cancellation_reaches_the_owning_worker(self):
+    async def test_uncooperative_cancellation_recycles_the_owning_worker(self):
         handle = await self.root_handle()
         generations = [w.generation for w in self.workers]
         task = asyncio.create_task(self.call("lean_run_with", handle=handle, text="pool_sleep"))
@@ -293,6 +293,58 @@ class IntegrationTest(unittest.IsolatedAsyncioTestCase):
         async with asyncio.timeout(15):
             while all(w.generation == old for w,old in zip(self.workers,generations)):
                 await asyncio.sleep(.01)
+        self.assertEqual(sum(w.generation != old for w, old in zip(self.workers, generations)), 1)
+
+    async def test_cooperative_cancellation_and_timeout_preserve_other_clients_handles(self):
+        handle = await self.root_handle()
+        owner = next(h.peer for h in self.pool.handles.values())
+        other = next(p for p in self.pool.peers.values() if p is not owner)
+        worker = self.workers[self.pool.endpoints.index(owner.endpoint)]
+        generation = worker.generation
+        second = Mcp(list(self.native.command), str(self.root), 2)
+        self.addAsyncCleanup(second.close)
+        await second.start()
+
+        async def call(name, **args):
+            return await second.call(name, {
+                "workspace": {"root": str(self.root)}, "path": "Proof.lean", **args})
+
+        version = (await call("lean_sync"))["version"]
+        other.busy = 1
+        retained = (await call("lean_run_at_handle", version=version, line=3, character=2,
+                               text="constructor"))["next_handle"]
+        self.assertTrue(all(h.peer is owner for h in self.pool.handles.values()))
+        other.busy = 0
+        text = ("run_tac do\n  for _ in [0:1000] do\n"
+                "    Lean.Core.checkInterrupted\n    let _ ← IO.sleep 10\n    pure ()")
+        for ending in ("cancel", "timeout"):
+            with self.subTest(ending=ending):
+                worker.timeout = .3 if ending == "timeout" else 60
+                task = asyncio.create_task(self.call("lean_run_with", handle=handle, text=text))
+                async with asyncio.timeout(5):
+                    while not worker.mcp.pending:
+                        if task.done():
+                            await task
+                            self.fail("cooperative tactic finished before cancellation")
+                        await asyncio.sleep(.01)
+                if ending == "cancel":
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                else:
+                    with self.assertRaises(Failure) as error:
+                        await task
+                    self.assertEqual(error.exception.code, "deadlineExceeded")
+                async with asyncio.timeout(10):
+                    while worker.busy or self.pool.jobs:
+                        await asyncio.sleep(.01)
+                self.assertEqual(worker.generation, generation)
+                self.assertIsNone(worker.reset_task)
+                self.assertEqual(len(worker.handles), 2)
+                self.assertTrue(owner.info["ready"])
+                worker.timeout = 60
+                child = await call("lean_run_with", handle=retained, text="all_goals trivial")
+                self.assertTrue(child["success"])
+                await call("lean_release", handle=child["next_handle"])
 
     async def test_worker_loss_keeps_typed_failure_without_local_reexecution(self):
         root = await self.root_handle()

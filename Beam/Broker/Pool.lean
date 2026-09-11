@@ -151,16 +151,16 @@ private def checkStop (cancelRef? : Option (IO.Ref Bool)) (deadline : Nat) : Act
     throw { error := { code := "deadlineExceeded", message := "pool request deadline exceeded" } }
 
 private partial def waitPromise (promise : IO.Promise (Except IO.Error α))
-    (cancelRef? : Option (IO.Ref Bool)) (deadline : Nat) : Action α := do
+    (cancelRef? : Option (IO.Ref Bool)) (deadline : Nat) (pollMs : UInt32 := 1) : Action α := do
   checkStop cancelRef? deadline
   if ← liftIO <| IO.hasFinished promise.result? then
     let some result ← liftIO <| IO.wait promise.result?
       | throw <| responseFailureFor .workerExited "pool connection closed"
     match result with
     | .ok value => return value
-    | .error _ => throw <| responseFailureFor .workerExited "pool connection failed"
-  liftIO <| IO.sleep 1
-  waitPromise promise cancelRef? deadline
+    | .error error => throw <| responseFailureFor .workerExited s!"pool connection failed: {error}"
+  liftIO <| IO.sleep pollMs
+  waitPromise promise cancelRef? deadline (min (2 * pollMs) 10)
 
 private def maxFrame := 4 * 1024 * 1024
 
@@ -177,7 +177,7 @@ private partial def receive (socket : Std.Internal.UV.TCP.Socket) (identity : St
     unless (← decode (← field message "id") : String) == identity do
       throw <| responseFailureFor .internalError "pool response id mismatch"
     if (message.getObjVal? "event").isOk then
-      -- The broker emits its own typed progress. Never parse human MCP progress strings.
+      -- Remote progress is not yet part of the broker's typed stream contract.
       return ← receive socket identity (buffer.extract (pos + 1) buffer.size) cancelRef? deadline
     if (← decode (← field message "ok") : Bool) then
       return ← field message "result"
@@ -235,7 +235,7 @@ def request (binding : Binding) (op : String) (args : Json)
       let sent ← liftIO <| socket.send #[data]
       waitPromise sent cancelRef? deadline
       receive socket identity {} cancelRef? deadline).run
-  catch _ => return .error <| responseFailureFor .workerExited "pool transport failed"
+  catch error => return .error <| responseFailureFor .workerExited s!"pool transport failed: {error}"
   finally
     try socket.cancelRecv catch _ => pure ()
     try discard <| socket.shutdown catch _ => pure ()

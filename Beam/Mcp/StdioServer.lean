@@ -124,12 +124,14 @@ private structure Coordinator where
   state : ServerState
   routing : Std.Mutex RoutingState
   output : OutputSink
+  respondToCancellation : Bool
 
-private def Coordinator.create : IO Coordinator := do
+private def Coordinator.create (respondToCancellation : Bool) : IO Coordinator := do
   pure {
     state := ← ServerState.create
     routing := ← Std.Mutex.new {}
     output := ← OutputSink.create
+    respondToCancellation
   }
 
 private def Coordinator.registerRequest
@@ -259,7 +261,7 @@ private def Coordinator.finishRequest
           pure true
       | .clientCancelled =>
           set { current with phase := .completed }
-          pure false
+          pure coordinator.respondToCancellation
       | .completed =>
           pure false
     -- Retire the exact admission before its terminal response becomes visible. A client may reuse
@@ -624,7 +626,7 @@ private def Coordinator.handleIncoming
 
 partial def runStdio (opts : Options) : IO Unit := do
   let stdin ← IO.getStdin
-  let coordinator ← Coordinator.create
+  let coordinator ← Coordinator.create opts.respondToCancellation
   let rec loop : IO Unit := do
     let input ← stdin.getLine
     if input.isEmpty then
@@ -663,6 +665,7 @@ def main (args : List String) : IO Unit := do
         leanCmd? := opts.leanCmd?
         leanPlugin? := opts.leanPlugin?
         beamCli? := opts.beamCli?
+        respondToCancellation := opts.respondToCancellation
       } path
   | none =>
       runStdio opts
