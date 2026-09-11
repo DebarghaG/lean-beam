@@ -1,6 +1,6 @@
 ---
 name: lean-beam
-description: Use this when an AI should work on an external Lean project through the installed `lean-beam` wrapper, giving it direct efficient access to Lean's proof engine to avoid repeated inner-loop rebuilds through cheap speculative checks and zero-build module checkpoints.
+description: Work on external Lean projects through Lean Beam's CLI or MCP. Draft declaration skeletons, inspect goals, test speculative Lean text, and checkpoint modules without repeated inner-loop builds.
 ---
 
 # Lean Beam
@@ -15,6 +15,16 @@ no such CI result is available or server-sensitive elaboration is suspected.
 This is the Lean-only skill. It should stay focused on Lean and should not require Rocq setup or Rocq concepts.
 Do not factor shared Lean/Rocq skill instructions into a common helper; duplicate short guidance if
 both skills need it.
+
+## Drafting
+
+When asked to turn an informal claim or program specification into Lean declarations, read
+[references/draft.md](references/draft.md). It covers checked skeletons, optional short proof attempts,
+and writing an accepted draft to source. Ask for it with, for example:
+
+> Use $lean-beam to draft a theorem saying that adding two natural numbers is commutative.
+
+This is an agent workflow using the existing CLI/MCP tools; there is no `lean-beam draft` command.
 
 ## Setup
 

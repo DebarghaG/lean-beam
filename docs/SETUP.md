@@ -398,6 +398,10 @@ Detailed Lean workflow guidance lives in
 summarized in [ROCQ.md](ROCQ.md), with agent workflow details in
 [../skills/rocq-beam/SKILL.md](../skills/rocq-beam/SKILL.md).
 
+For declaration skeletons, ask your agent to use `$lean-beam` to draft the claim. The
+[draft workflow](../skills/lean-beam/references/draft.md) checks statements through Beam and can make
+a short proof attempt or write a file when requested.
+
 ## MCP Setup
 
 Use this section only when your editor or agent client speaks MCP. The ordinary `lean-beam` CLI
