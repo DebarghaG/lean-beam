@@ -33,6 +33,26 @@ class ProtocolTest(unittest.TestCase):
 
 
 class McpLifetimeTest(unittest.IsolatedAsyncioTestCase):
+    async def test_tool_errors_use_the_typed_mcp_contract(self):
+        mcp = Mcp([], str(Path.cwd()), 1)
+        error = {"code": "contentModified", "message": "source changed", "data": {"version": 3}}
+
+        async def send(message):
+            mcp.pending[message["id"]].result.set_result({
+                "result": {"isError": True, "structuredContent": error}})
+
+        mcp.send = send
+        with self.assertRaises(Failure) as failure:
+            await mcp.call("lean_run_at", {})
+        self.assertEqual(failure.exception.code, "contentModified")
+        self.assertEqual(failure.exception.message, "source changed")
+        self.assertEqual(failure.exception.data, {"version": 3})
+        for error in [{"error": error}, {"code": 1, "message": "wrong code type"},
+                      {"code": "contentModified"}, {"code": "error", "message": None}]:
+            with self.subTest(error=error), self.assertRaises(Failure) as failure:
+                await mcp.call("lean_run_at", {})
+            self.assertEqual(failure.exception.code, "protocolError")
+
     async def test_failed_drain_retires_worker(self):
         worker = Worker(Path.cwd(), Path("unused"), Path("unused"), Path("unused"))
         worker.begin_recycle = Mock()

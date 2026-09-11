@@ -186,6 +186,10 @@ jobs:
       - name: Beam Install Test
         run: bash tests/test-beam-install.sh
 
+      - name: Defensive Validation Tests
+        if: runner.os == 'Linux'
+        run: bash tests/test-validate-defensive.sh
+
   beam-toolchain-compat:
     name: beam-toolchain-compat (${{ matrix.os }}, ${{ matrix.toolchain }})
     runs-on: ${{ matrix.os }}

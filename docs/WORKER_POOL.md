@@ -90,8 +90,7 @@ scale-up, and worker pod replacement. Handles on a removed worker are invalidate
 ## Limits
 
 - Toolchain and Lake configuration changes require a new prepared environment and attachment.
-  Ordinary source edits and module saves do not. When upgrading from the old pool configuration
-  format, attach to a new config path and restart the client with that path.
+  Ordinary source edits and module saves do not.
 - Run one gateway. Restarting it loses handles. Removing a worker loses its handles too; there is
   no automatic migration or graceful scale-down controller.
 - Cancellation and timeouts allow three seconds for execution to stop, then retire its private

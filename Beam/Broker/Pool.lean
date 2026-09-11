@@ -41,7 +41,7 @@ structure Binding where
   snapshot : String
   binding : String
   inputsFile : String
-  inputs : Array InputStamp := #[]
+  inputs : Std.TreeMap String InputStamp := {}
   deriving Inhabited
 
 instance : FromJson Binding where
@@ -81,14 +81,16 @@ private initialize bindingsCache : Std.Mutex (Option (Except String (Array Bindi
   Std.Mutex.new none
 
 private initialize inputsCache :
-    Std.Mutex (Std.TreeMap String (Except String (Array InputStamp))) ← Std.Mutex.new {}
+    Std.Mutex (Std.TreeMap String (Except String (Std.TreeMap String InputStamp))) ← Std.Mutex.new {}
 
-private def readInputs (file : String) : IO (Except String (Array InputStamp)) := do
+private def readInputs (file : String) : IO (Except String (Std.TreeMap String InputStamp)) := do
   try
     if (← (System.FilePath.mk file).metadata).byteSize.toNat > 32 * 1024 * 1024 then
       return .error "workspace input manifest exceeds 32 MiB"
     let text ← IO.FS.readFile file
-    pure <| (Json.parse text).bind fromJson?
+    pure <| do
+      let inputs : Array InputStamp ← fromJson? (← Json.parse text)
+      return Files.stampMap inputs
   catch error => return .error s!"cannot load workspace inputs: {error}"
 
 -- Configuration is an operator setting frozen for the process lifetime, not a request argument.
@@ -301,7 +303,7 @@ private def prepareProjectState (binding : Binding) (group : String) (old : Proj
     | some watch => liftIO <| Files.changed watch
     | none => pure #[]
   let root := System.FilePath.mk binding.root
-  let baseline := Files.stampMap binding.inputs
+  let baseline := binding.inputs
   let mut state := old
   if old.dirty || old.watch?.isNone || !changed.isEmpty then
     let watch ← liftIO Files.watchNew

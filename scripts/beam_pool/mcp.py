@@ -8,7 +8,6 @@ import os
 import signal
 import sys
 import uuid
-from collections import deque
 from dataclasses import dataclass
 
 from .protocol import Failure, MAX_FRAME, canonical
@@ -29,7 +28,6 @@ class Mcp:
         self.pending: dict[str, Pending] = {}
         self.write_lock = asyncio.Lock()
         self.readers: list[asyncio.Task] = []
-        self.stderr = deque(maxlen=40)
         self.closed = False
         self.failure: Failure | None = None
 
@@ -56,7 +54,6 @@ class Mcp:
     async def read_stderr(self) -> None:
         while line := await self.proc.stderr.readline():
             text = line.decode(errors="replace").rstrip()
-            self.stderr.append(text)
             print(f"beam-worker: {text}", file=sys.stderr)
 
     async def read_stdout(self) -> None:
@@ -129,9 +126,11 @@ class Mcp:
             if not isinstance(structured, dict) or type(result.get("isError")) is not bool:
                 raise Failure("protocolError", "MCP tool result lacks typed content")
             if result["isError"]:
-                error = structured.get("error", structured)
-                raise Failure(str(error.get("code", "mcpError")),
-                              str(error.get("message", "MCP tool failed")), structured)
+                if (not {"code", "message"} <= structured.keys() <= {"code", "message", "data"} or
+                        not isinstance(structured["code"], str) or
+                        not isinstance(structured["message"], str)):
+                    raise Failure("protocolError", "MCP tool error lacks typed content")
+                raise Failure(structured["code"], structured["message"], structured.get("data"))
             return structured
         finally:
             self.pending.pop(identity, None)

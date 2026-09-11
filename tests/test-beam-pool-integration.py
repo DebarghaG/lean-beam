@@ -8,6 +8,7 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -66,6 +67,36 @@ class AttachmentTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(bindings), 2)
         self.assertEqual(bindings[0]["inputs"], bindings[1]["inputs"])
         self.assertLess(self.config.stat().st_size, 2048)
+
+    async def test_concurrent_attachments_preserve_both_bindings(self):
+        self.config.parent.mkdir()
+        self.config.write_text('{"schema": 2, "bindings": []}\n')
+        readers = threading.Barrier(2)
+        read_text = Path.read_text
+
+        def read_together(path, *args, **kwargs):
+            text = read_text(path, *args, **kwargs)
+            if path == self.config:
+                # Force overlapping reads if writers are unlocked. A serialized writer
+                # proceeds when the barrier expires, then lets the other read its update.
+                try:
+                    readers.wait(timeout=1)
+                except threading.BrokenBarrierError:
+                    pass
+            return text
+
+        with tempfile.TemporaryDirectory(prefix="beam-pool-attach-peer-") as other:
+            shutil.copytree(self.root, other, dirs_exist_ok=True)
+            with patch("scripts.beam_pool.attach.rpc", side_effect=self.rpc), \
+                    patch.object(Path, "read_text", read_together):
+                async with asyncio.timeout(10):
+                    await asyncio.gather(*(asyncio.to_thread(asyncio.run,
+                        attach(root, ("localhost", 9000), TOKEN, self.config))
+                        for root in (self.root, Path(other))))
+            bindings = json.loads(self.config.read_text())["bindings"]
+            self.assertEqual({b["root"] for b in bindings}, {str(self.root), other})
+            for binding in bindings:
+                self.assertTrue((self.config.parent / binding["inputs"]).is_file())
 
     async def test_source_mismatch_preserves_existing_configuration(self):
         with patch("scripts.beam_pool.attach.rpc", side_effect=self.rpc):

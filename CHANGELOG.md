@@ -9,6 +9,7 @@ This project keeps a lightweight, reverse-chronological changelog. Dates use `YY
 ### Added
 
 - Optional Lean worker pools use the existing CLI/MCP requests and continuation handles.
+  Source edits and module saves transfer automatically into private worker workspaces.
 - Additive retained-handle MCP tools advertise `destructiveHint = false`, while workspace eviction
   and document close advertise `idempotentHint = true` without being classified as read-only.
 - Ten additional observational MCP tools advertise the read-only hint, covering server inspection,
@@ -34,8 +35,6 @@ This project keeps a lightweight, reverse-chronological changelog. Dates use `YY
 
 ### Changed
 
-- Worker pools preserve queued continuation handles and drain cancelled requests before restarting
-  a worker, so cooperative cancellation preserves other clients' handles.
 - Clarify zero-based `run-at` coordinates and how tactic positions select before/after proof states,
   with guidance for probing tactic replacements
   ([#253](https://github.com/leanprover/lean-beam/pull/253), @ejgallego).

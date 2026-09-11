@@ -1,7 +1,8 @@
 """Operator setup: verify a prepared project and bind ordinary Beam CLI/MCP to its pool."""
 
-import json
+import fcntl
 import hashlib
+import json
 import os
 import uuid
 from pathlib import Path
@@ -50,38 +51,41 @@ async def attach(root: Path, endpoint: tuple[str, int], token: str,
         inputs.append({"path": path, "size": current.st_size, "sec": sec, "nsec": nsec,
                        "digest": local.files[path]})
     config = config.absolute()
-    data = {"schema": 2, "bindings": []}
-    if config.exists():
-        data = json.loads(config.read_text())
-        fields(data, {"schema", "bindings"})
-        if data["schema"] != 2 or not isinstance(data["bindings"], list):
-            raise Failure("invalidParams", "unsupported binding configuration; attach to a new config path")
-    data["bindings"] = [b for b in data["bindings"] if b["root"] != str(root)]
     manifest = json.dumps(inputs, separators=(",", ":")).encode()
     if len(manifest) > 32 * 1024 * 1024:
         raise Failure("resourceExhausted", "workspace input manifest exceeds 32 MiB")
     inputs_name = config.name + "." + hashlib.sha256(manifest).hexdigest() + ".inputs.json"
-    data["bindings"].append({"root": str(root), "host": endpoint[0], "port": endpoint[1],
-        "snapshot": matched[0], "binding": uuid.uuid4().hex, "inputs": inputs_name})
     config.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    manifest_path = config.parent / inputs_name
-    if not manifest_path.exists():
-        temporary = manifest_path.with_name(manifest_path.name + "." + uuid.uuid4().hex + ".tmp")
+    # Atomic replacement protects readers; the lock preserves other concurrent attachments.
+    with config.with_name(config.name + ".lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        data = {"schema": 2, "bindings": []}
+        if config.exists():
+            data = json.loads(config.read_text())
+            fields(data, {"schema", "bindings"})
+            if data["schema"] != 2 or not isinstance(data["bindings"], list):
+                raise Failure("invalidParams", "unsupported binding configuration; attach to a new config path")
+        data["bindings"] = [b for b in data["bindings"] if b["root"] != str(root)]
+        data["bindings"].append({"root": str(root), "host": endpoint[0], "port": endpoint[1],
+            "snapshot": matched[0], "binding": uuid.uuid4().hex, "inputs": inputs_name})
+        manifest_path = config.parent / inputs_name
+        if not manifest_path.exists():
+            temporary = manifest_path.with_name(manifest_path.name + "." + uuid.uuid4().hex + ".tmp")
+            try:
+                with temporary.open("xb") as stream:
+                    os.chmod(temporary, 0o600)
+                    stream.write(manifest)
+                os.replace(temporary, manifest_path)
+            finally:
+                temporary.unlink(missing_ok=True)
+        temporary = config.with_name(config.name + "." + uuid.uuid4().hex + ".tmp")
         try:
-            with temporary.open("xb") as stream:
+            with temporary.open("x") as stream:
                 os.chmod(temporary, 0o600)
-                stream.write(manifest)
-            os.replace(temporary, manifest_path)
+                json.dump(data, stream, indent=2)
+                stream.write("\n")
+            os.replace(temporary, config)
         finally:
             temporary.unlink(missing_ok=True)
-    temporary = config.with_name(config.name + "." + uuid.uuid4().hex + ".tmp")
-    try:
-        with temporary.open("x") as stream:
-            os.chmod(temporary, 0o600)
-            json.dump(data, stream, indent=2)
-            stream.write("\n")
-        os.replace(temporary, config)
-    finally:
-        temporary.unlink(missing_ok=True)
     return {"config": str(config), "root": str(root), "snapshot": matched[0], "inputs": len(inputs),
             "restart_required": True, "environment": {"BEAM_LEAN_POOL_CONFIG": str(config)}}

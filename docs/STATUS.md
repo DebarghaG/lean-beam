@@ -11,8 +11,9 @@ workflows.
 Pre-stable compatibility policy lives in [Compatibility Policy](COMPATIBILITY.md).
 
 An optional [worker pool](WORKER_POOL.md) routes existing CLI/MCP requests across prepared Lean
-workers. It requires unchanged project inputs and a single gateway. Automatic scaling, gateway
-failover, and live handle migration are not implemented.
+workers. Source edits and module saves transfer automatically into private worker workspaces.
+It requires a single gateway; automatic scaling, gateway failover, and live handle migration are
+not implemented.
 
 ## Current Scope
 
