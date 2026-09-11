@@ -1,7 +1,7 @@
 name: beam-pool
 services:
   worker:
-    image: beam-pool:local
+    image: ${BEAM_POOL_IMAGE:-beam-pool:local}
     init: true
     cpus: 1
     mem_limit: 2g
@@ -17,7 +17,7 @@ services:
       start_period: 120s
     networks: [pool]
   gateway:
-    image: beam-pool:local
+    image: ${BEAM_POOL_IMAGE:-beam-pool:local}
     init: true
     command: [serve, --worker-dns, worker:9001, --listen, '0.0.0.0:9000']
     cpus: 1

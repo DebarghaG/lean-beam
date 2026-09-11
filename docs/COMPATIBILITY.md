@@ -37,7 +37,8 @@ A Lean release line is the canonical `major.minor` family recorded in
   concurrency from MCP tool annotations or otherwise no longer requires the setting.
 - Documented real client requirements, when they name an owner and removal condition.
 - The pool client uses Lean's internal `Std.Internal.UV.TCP` and `Std.Internal.UV.DNS` APIs,
-  compiled against the selected toolchain. Pool workers must use the same exact Lean/Beam runtime.
+  compiled against the selected toolchain, and Linux inotify for source changes. Pool workers
+  must use the same exact Lean/Beam runtime.
 
 ## Change Rule
 

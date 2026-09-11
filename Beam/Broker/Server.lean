@@ -2236,7 +2236,7 @@ private def validatePoolRequest
     (server : ServerRuntime) (prepared : PreparedPoolRequest) (snapshot : FileSyncSnapshot)
     (binding : Pool.Binding) (cancelRef? : Option (IO.Ref Bool)) : HandlerM Unit := do
   liftFailureIO <| ensureRequestNotCancelled cancelRef?
-  liftFailureIO <| Pool.checkInputs binding snapshot.path
+  liftFailureIO <| Pool.checkPath binding snapshot.path
   let sourceMatches ← liftHandlerIO do
     try pure ((← IO.FS.readFile snapshot.path) == snapshot.text)
     catch _ => pure false
@@ -2254,6 +2254,13 @@ private def executePoolRequest
     (storeHandle : Bool) (cancelRef? : Option (IO.Ref Bool)) : HandlerM Response := do
   validatePoolRequest server prepared snapshot binding cancelRef?
   let group := prepared.session.sessionToken
+  let revision? ← if op == "runAt" then
+    pure <| some (← liftFailureIO <| Pool.prepareProject binding group cancelRef?)
+    else pure none
+  let args := match revision? with
+    | some revision => args.setObjVal! "revision" (toJson revision.id)
+    | none => args
+  validatePoolRequest server prepared snapshot binding cancelRef?
   let reply ← liftFailureIO <| Pool.request binding op
     (args.setObjVal! "group" (toJson group)) cancelRef?
   if op == "release" then
@@ -2264,7 +2271,10 @@ private def executePoolRequest
     return Response.success result
   let result ← requestArg <| Pool.result reply
   let id? := (result.getObjValAs? String "handle").toOption
-  let validation ← liftHandlerIO <| (validatePoolRequest server prepared snapshot binding cancelRef?).run
+  let validation ← liftHandlerIO <| (do
+    validatePoolRequest server prepared snapshot binding cancelRef?
+    if let some revision := revision? then
+      liftFailureIO <| Pool.projectUnchanged binding revision).run
   if !validation.isOk || !storeHandle then
     if let some id := id? then
       discard <| liftHandlerIO <| Pool.request binding "release"

@@ -10,6 +10,19 @@ from typing import Any
 
 MAX_FRAME = 4 * 1024 * 1024
 MAX_TEXT = 128 * 1024
+INPUT_SUFFIXES = {".lean", ".olean", ".server", ".private", ".ir", ".sig", ".so", ".dylib", ".dll",
+                  ".ilean", ".trace", ".c", ".bc"}
+EXCLUDED_DIRS = {".git", ".beam", ".codex-worktrees", "__pycache__", "node_modules", ".venv"}
+
+
+def input_file(path: str) -> bool:
+    p = Path(path)
+    return (not EXCLUDED_DIRS.intersection(p.parts) and
+            (p.suffix in INPUT_SUFFIXES or p.name in {"lean-toolchain", "lakefile.toml", "lake-manifest.json"}))
+
+
+def source_file(path: str) -> bool:
+    return path.endswith(".lean") and Path(path).name != "lakefile.lean"
 
 
 class Failure(Exception):
@@ -82,13 +95,11 @@ class Snapshot:
         if not (root / "lean-toolchain").is_file():
             raise Failure("invalidParams", "project must contain lean-toolchain")
         entries = {}
-        suffixes = {".lean", ".olean", ".server", ".private", ".ir", ".sig", ".so", ".dylib", ".dll"}
         for directory, dirs, names in os.walk(root):
-            dirs[:] = sorted(d for d in dirs if d not in {
-                ".git", ".beam", ".codex-worktrees", "__pycache__", "node_modules", ".venv"})
+            dirs[:] = sorted(d for d in dirs if d not in EXCLUDED_DIRS)
             for name in sorted(names):
                 path = Path(directory) / name
-                if path.suffix in suffixes or name in {"lean-toolchain", "lakefile.toml", "lake-manifest.json"}:
+                if input_file(path.relative_to(root).as_posix()):
                     if not path.resolve().is_relative_to(root):
                         raise Failure("invalidParams", f"snapshot contains an external symlink: {path}")
                     entries[path.relative_to(root).as_posix()] = digest_file(path)

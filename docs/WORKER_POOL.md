@@ -5,9 +5,13 @@ commands and continuation handles. Independent requests can use different worker
 stay with the worker that created them. Sync, navigation, and save still run locally.
 
 This is optional and experimental. Build your project and dependencies before copying them to
-workers. Client and worker copies need byte-identical sources and compiled imports, including `.olean`
-files. The example project imports only the Lean standard library, already included in the image.
-The pool scripts require Linux and Python 3.11 or later.
+workers. Attachment needs matching sources and compiled imports, including `.olean` files. After
+that, Beam sends source edits, new files, and changed build artifacts automatically. Each client
+gets private worker workspaces over the prepared dependencies. Agents keep their usual edit,
+sync, probe, and save workflow; edited imports still need the usual save and refresh steps.
+Use separate local worktrees for agents that edit independently.
+The example project imports only the Lean standard library, already included in the image.
+Pool clients and workers require Linux; the pool scripts also require Python 3.11 or later.
 
 ## Run locally
 
@@ -38,6 +42,8 @@ scripts/lean-beam --root /path/to/project serve
 For MCP, set `BEAM_LEAN_POOL_CONFIG` and `BEAM_POOL_TOKEN` in the MCP server's environment instead.
 Restart an existing session after changing either setting. Attachment checks file hashes; it does
 not copy or build the project. Unattached projects continue to run locally.
+Keep the generated `.inputs.json` files beside the config; Beam loads each workspace's inputs on
+first use, and matching workspaces share the same file.
 
 `scripts/beam-pool status` shows available workers, queued requests, and retained handles.
 Use `--help` on each command for limits and endpoint options.
@@ -53,25 +59,54 @@ docker compose -f deploy/beam-pool/compose.yaml up -d --scale worker=4
 ```
 
 The Compose file gives each worker a one-CPU quota. This does not pin it to a particular core.
-Attach the matching local project as above. A [Kubernetes example](../deploy/beam-pool/kubernetes.yaml)
-is also provided; set the image digest and create its `beam-pool-auth` Secret before applying it.
-The Kubernetes example has not been tested on a live cluster.
+Attach the matching local project as above.
+
+## Kubernetes
+
+With [kind](https://kind.sigs.k8s.io/docs/user/quick-start/) and `kubectl` installed, use the image
+built above and the same `BEAM_POOL_TOKEN`:
+
+```bash
+kind create cluster --name beam-pool
+kind load docker-image beam-pool:local --name beam-pool
+kubectl create namespace beam-pool
+kubectl -n beam-pool create secret generic beam-pool-auth --from-literal=token="$BEAM_POOL_TOKEN"
+kubectl -n beam-pool apply -f deploy/beam-pool/kubernetes.yaml
+kubectl -n beam-pool rollout status deployment/beam-workers
+kubectl -n beam-pool rollout status deployment/beam-pool
+kubectl -n beam-pool port-forward service/beam-pool 9000:9000
+```
+
+Keep port-forward running and attach the matching local project as above. Scale workers with
+`kubectl -n beam-pool scale deployment/beam-workers --replicas=6`; keep one gateway.
+Remove the local cluster with `kind delete cluster --name beam-pool` when finished.
+For a remote cluster, publish the image and use the same immutable digest for both deployments in
+the [manifest](../deploy/beam-pool/kubernetes.yaml).
+
+Tested with `tests/pool_project` on a three-node kind v0.33.0 cluster running Kubernetes v1.37.0:
+CLI/MCP proofs, six simultaneous requests, scaling 4 → 6 → 2 workers, continuation handles across
+scale-up, and worker pod replacement. Handles on a removed worker are invalidated.
 
 ## Limits
 
-- Project inputs must stay unchanged. After edits, prepare new workers, attach again, and restart
-  Beam. Requests check document versions, source content, and other prepared files' metadata.
+- Toolchain and Lake configuration changes require a new prepared environment and attachment.
+  Ordinary source edits and module saves do not. When upgrading from the old pool configuration
+  format, attach to a new config path and restart the client with that path.
 - Run one gateway. Restarting it loses handles. Removing a worker loses its handles too; there is
   no automatic migration or graceful scale-down controller.
-- Cancellation and timeouts allow three seconds for execution to stop. If it does not, the worker
-  restarts and all clients lose their handles on that worker. Linear handles may be consumed once
-  execution starts. Queued cancellations preserve handles.
+- Cancellation and timeouts allow three seconds for execution to stop, then retire its private
+  workspace if needed. An MCP process failure still loses every handle on that worker. Linear
+  handles may be consumed once execution starts. Queued cancellations preserve handles.
 - Idle handles expire; explicit release frees them sooner. Closing a local document invalidates
   its handles, but remote cleanup waits for expiry.
 - Remote progress and diagnostic events are not streamed. Final results still include messages.
-- Attachment hashes every prepared input twice. Requests check input metadata before and after
-  execution. This cost grows with the project and dependencies; Mathlib-scale latency is unmeasured.
-  Pending socket operations poll with delays that grow from 1 to 10 ms.
+- Workers cache up to four private workspaces by default. Live handles keep their workspace in
+  memory. Use `--max-contexts` and `--max-project-bytes` to set workspace and file-cache budgets;
+  requests fail with `resourceExhausted` when live state fills them. Each revision allows 8,192
+  changed files. Unused state expires or is evicted to make room.
+- Attachment hashes the prepared inputs twice. File watching avoids rescanning unchanged projects;
+  edits scan metadata and transfer changed content. The first probe on a worker still loads its
+  Lean environment. Pending socket operations poll with delays that grow from 1 to 10 ms.
 - Transport uses a shared token over plain TCP. Keep it on a trusted private network.
 
 ## Tests

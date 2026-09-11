@@ -21,7 +21,7 @@ from scripts.beam_pool.mcp import Mcp
 from scripts.beam_pool.pool import Pool
 from scripts.beam_pool.protocol import Failure, Snapshot
 from scripts.beam_pool.transport import RpcServer
-from scripts.beam_pool.worker import Worker
+from scripts.beam_pool.worker import Worker, file_io
 
 TOKEN = "integration-test-pool-capability"
 
@@ -52,7 +52,20 @@ class AttachmentTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(TOKEN, self.config.read_text())
         self.assertEqual(self.config.stat().st_mode & 0o777, 0o600)
         binding = json.loads(self.config.read_text())["bindings"][0]
-        self.assertEqual({i["path"] for i in binding["inputs"]}, self.files.keys())
+        manifest = self.config.parent / binding["inputs"]
+        self.assertEqual({i["path"] for i in json.loads(manifest.read_text())}, self.files.keys())
+        self.assertEqual(manifest.stat().st_mode & 0o777, 0o600)
+
+    async def test_multiple_workspace_bindings_share_their_input_manifest(self):
+        with tempfile.TemporaryDirectory(prefix="beam-pool-attach-peer-") as other:
+            shutil.copytree(self.root, other, dirs_exist_ok=True)
+            with patch("scripts.beam_pool.attach.rpc", side_effect=self.rpc):
+                await attach(self.root, ("localhost", 9000), TOKEN, self.config)
+                await attach(Path(other), ("localhost", 9000), TOKEN, self.config)
+        bindings = json.loads(self.config.read_text())["bindings"]
+        self.assertEqual(len(bindings), 2)
+        self.assertEqual(bindings[0]["inputs"], bindings[1]["inputs"])
+        self.assertLess(self.config.stat().st_size, 2048)
 
     async def test_source_mismatch_preserves_existing_configuration(self):
         with patch("scripts.beam_pool.attach.rpc", side_effect=self.rpc):
@@ -84,12 +97,18 @@ class IntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.root = self.state / "project"
         self.root.mkdir()
         (self.root / "lean-toolchain").write_text((REPO / "lean-toolchain").read_text())
-        (self.root / "lakefile.toml").write_text('name = "pool_integration"\n')
+        (self.root / "lakefile.toml").write_text(
+            'name = "pool_integration"\n[[lean_lib]]\nname = "Proof"\n'
+            '[[lean_lib]]\nname = "Helper"\n')
+        (self.root / "Helper.lean").write_text('import Lean\ndef helper : Nat := 1\n')
         # Prepare Lake metadata before hashing an immutable snapshot.
         process = await asyncio.create_subprocess_exec("lake", "update", cwd=self.root,
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
         self.assertEqual(await process.wait(), 0)
-        self.code = ('import Lean\nelab "pool_sleep" : tactic => do let _ ← IO.sleep 10000; pure ()\n'
+        process = await asyncio.create_subprocess_exec("lake", "build", "Helper", cwd=self.root,
+            stdout=asyncio.subprocess.DEVNULL)
+        self.assertEqual(await process.wait(), 0)
+        self.code = ('import Helper\nelab "pool_sleep" : tactic => do let _ ← IO.sleep 10000; pure ()\n'
                      'example : True ∧ True := by\n  constructor <;> trivial\n')
         (self.root / "Proof.lean").write_text(self.code)
         (self.root / "Other.lean").write_text(self.code)
@@ -114,7 +133,9 @@ class IntegrationTest(unittest.IsolatedAsyncioTestCase):
             str(REPO / ".lake/build/bin/lean-beam-mcp"), "--lean-cmd", shutil.which("lean"),
             "--lean-plugin", str(REPO / ".lake/build/lib/libbeam_Beam_LSP.so")], str(self.root), 2)
         await self.native.start()
-        self.version = (await self.call("lean_sync"))["version"]
+        synced = await self.call("lean_sync", diagnostics_in_result=True)
+        self.assertEqual(synced["readiness"]["blocking_error_count"], 0, synced)
+        self.version = synced["version"]
 
     async def close_resources(self):
         if self.cli_owner:
@@ -143,6 +164,18 @@ class IntegrationTest(unittest.IsolatedAsyncioTestCase):
     async def root_handle(self):
         return (await self.call("lean_run_at_handle", version=self.version, line=3, character=2,
                                 text="constructor"))["next_handle"]
+
+    async def test_unused_workspace_manifests_are_not_loaded(self):
+        config = json.loads(self.config.read_text())
+        config["bindings"].append(config["bindings"][0] | {
+            "root": str(self.state / "unused-workspace"), "binding": "unused",
+            "inputs": "missing.inputs.json"})
+        self.config.write_text(json.dumps(config))
+        result = await self.call("lean_run_at", version=self.version, line=3, character=2,
+                                 text="constructor <;> trivial")
+        self.assertTrue(result["success"])
+        self.assertFalse(result["proof_state"]["goals"])
+        self.assertEqual(self.pool.completed, 1)
 
     async def test_mcp_routes_independent_calls_and_preserves_results(self):
         replies = await asyncio.gather(*(self.call("lean_run_at", version=self.version, line=3,
@@ -218,27 +251,145 @@ class IntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.pool.handles)
         self.assertFalse(any(w.handles for w in self.workers))
 
-    async def test_source_and_import_changes_fail_before_remote_execution(self):
+    async def test_stale_version_fails_before_remote_execution(self):
         count = self.pool.completed
         with self.assertRaises(Failure) as error:
             await self.call("lean_run_at", version=self.version+1, line=3, character=2, text="skip")
         self.assertEqual(error.exception.code, "contentModified")
         self.assertEqual(self.pool.completed, count)
-        # Deliberately violate the prepared-input contract in this negative regression.
-        (self.root / "Other.lean").write_text(self.code + "\n-- changed input\n")
+
+    async def second_client(self):
+        root = self.state / "second-client"
+        shutil.copytree(self.state / "prepared-worker-project", root)
+        await attach(root, self.endpoint, TOKEN, self.config)
+        native = Mcp(list(self.native.command), str(root), 2)
+        self.addAsyncCleanup(native.close)
+        await native.start()
+        async def call(name, **args):
+            return await native.call(name, {"workspace": {"root": str(root)}, "path": "Proof.lean", **args})
+        version = (await call("lean_sync"))["version"]
+        return call, version
+
+    async def test_edit_sync_probe_preserves_other_clients_on_same_worker(self):
+        unused = list(self.pool.peers.values())[1]
+        unused.busy = 1
+        old = await self.root_handle()
+        other, other_version = await self.second_client()
+        retained = (await other("lean_run_at_handle", version=other_version, line=3,
+                                character=2, text="constructor"))["next_handle"]
+        owners = {id(h.peer) for h in self.pool.handles.values()}
+        self.assertEqual(len(owners), 1)
+        (self.root / "Proof.lean").write_text(self.code.replace("True ∧ True", "True ∧ (2 = 2)"))
+        version = (await self.call("lean_sync"))["version"]
+        self.assertGreater(version, self.version)
+        edited = await self.call("lean_run_at", version=version, line=3, character=2, text="constructor")
+        self.assertTrue(edited["success"])
+        self.assertEqual(edited["proof_state"]["goals"][1]["target"], "2 = 2")
+        with self.assertRaises(Failure) as error:
+            await self.call("lean_run_with", handle=old, text="all_goals trivial")
+        self.assertEqual(error.exception.code, "contentModified")
+        solved = await other("lean_run_with", handle=retained, text="all_goals trivial")
+        self.assertTrue(solved["success"])
+        self.assertFalse(solved["proof_state"]["goals"])
+        await other("lean_release", handle=retained)
+        await other("lean_release", handle=solved["next_handle"])
+        self.assertTrue(all(w.restarts == 0 for w in self.workers))
+        unused.busy = 0
+
+    async def test_cache_pressure_cannot_evict_a_revision_being_applied(self):
+        unused = list(self.pool.peers.values())[1]
+        unused.busy = 1
+        await self.call("lean_run_at", version=self.version, line=3, character=2, text="skip")
+        worker = next(w for w in self.workers if w.contexts)
+        (self.root / "Proof.lean").write_text(self.code.replace("True ∧ True", "True ∧ (2 = 2)"))
+        version = (await self.call("lean_sync"))["version"]
+        applying, proceed = asyncio.Event(), asyncio.Event()
+
+        async def pause_apply(function, *args):
+            if function.__name__ == "apply":
+                applying.set()
+                await proceed.wait()
+            return await file_io(function, *args)
+
+        with patch("scripts.beam_pool.worker.file_io", side_effect=pause_apply):
+            task = asyncio.create_task(self.call("lean_run_at", version=version, line=3,
+                                                character=2, text="constructor"))
+            try:
+                await asyncio.wait_for(applying.wait(), 10)
+                with self.assertRaises(Failure) as error:
+                    worker.projects.make_room(worker.projects.max_bytes, worker.pinned_revisions())
+                self.assertEqual(error.exception.code, "resourceExhausted")
+            finally:
+                proceed.set()
+                result = await task
+        self.assertTrue(result["success"])
+        self.assertEqual(result["proof_state"]["goals"][1]["target"], "2 = 2")
+        self.assertFalse(worker.active_revisions)
+        unused.busy = 0
+
+    async def test_workspace_budget_preserves_handles_and_evicts_released_state(self):
+        unused = list(self.pool.peers.values())[1]
+        unused.busy = 1
+        for worker in self.workers:
+            worker.max_contexts = 1
+        retained = await self.root_handle()
+        other, version = await self.second_client()
+        with self.assertRaises(Failure) as error:
+            await other("lean_run_at", version=version, line=3, character=2, text="skip")
+        self.assertEqual(error.exception.code, "resourceExhausted")
+        resumed = await self.call("lean_run_with", handle=retained, text="all_goals trivial")
+        self.assertTrue(resumed["success"])
+        await self.call("lean_release", handle=retained)
+        await self.call("lean_release", handle=resumed["next_handle"])
+        solved = await other("lean_run_at", version=version, line=3, character=2,
+                             text="constructor <;> trivial")
+        self.assertTrue(solved["success"])
+        self.assertFalse(solved["proof_state"]["goals"])
+        self.assertTrue(all(len(w.contexts) <= 1 and w.restarts == 0 for w in self.workers))
+        unused.busy = 0
+
+    async def test_new_file_and_unchanged_metadata_edits_are_transferred(self):
+        await self.call("lean_run_at", version=self.version, line=3, character=2, text="skip")
+        new = self.root / "Nested/New.lean"
+        new.parent.mkdir()
+        new.write_text("example : 3 = 3 := by\n  sorry\n")
+        version = (await self.call("lean_sync", path="Nested/New.lean"))["version"]
+        result = await self.call("lean_run_at", path="Nested/New.lean", version=version,
+                                 line=1, character=2, text="rfl")
+        self.assertTrue(result["success"])
+        stamp = new.stat()
+        new.write_text("example : 4 = 4 := by\n  sorry\n")
+        os.utime(new, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+        version = (await self.call("lean_sync", path="Nested/New.lean"))["version"]
+        result = await self.call("lean_run_at", path="Nested/New.lean", version=version,
+                                 line=1, character=2, text="skip")
+        self.assertEqual(result["proof_state"]["goals"][0]["target"], "4 = 4")
+
+    async def test_saved_imports_create_private_dependency_revisions(self):
+        first = await self.call("lean_run_at_handle", version=self.version, line=2, character=0,
+                                text="def savedHelper : Nat := helper")
+        self.assertTrue(first["success"])
+        (self.root / "Helper.lean").write_text("import Lean\ndef helper : Nat := 2\n")
+        await self.call("lean_sync", path="Helper.lean")
+        await self.call("lean_save", path="Helper.lean")
+        # An existing continuation retains its imported environment until its own file is refreshed.
+        continued = await self.call("lean_run_with", handle=first["next_handle"], text="#eval helper")
+        self.assertEqual(continued["messages"][0]["text"], "1")
+        await self.call("lean_release", handle=continued["next_handle"])
+        await self.call("lean_release", handle=first["next_handle"])
+        version = (await self.call("lean_refresh"))["version"]
+        fresh = await self.call("lean_run_at", version=version, line=2, character=0, text="#eval helper")
+        self.assertTrue(fresh["success"])
+        self.assertEqual(fresh["messages"][0]["text"], "2")
+        self.assertEqual((self.state / "prepared-worker-project/Helper.lean").read_text(),
+                         "import Lean\ndef helper : Nat := 1\n")
+
+    async def test_configuration_changes_still_require_a_new_environment(self):
+        await self.root_handle()
+        (self.root / "lakefile.toml").write_text('name = "different"\n')
         with self.assertRaises(Failure) as error:
             await self.call("lean_run_at", version=self.version, line=3, character=2, text="skip")
         self.assertEqual(error.exception.code, "contentModified")
-        self.assertEqual(self.pool.completed, count)
-
-    async def test_source_must_match_the_attached_worker(self):
-        await self.call("lean_close")
-        (self.root / "Proof.lean").write_text(self.code + "\n-- changed source\n")
-        version = (await self.call("lean_sync"))["version"]
-        with self.assertRaises(Failure) as error:
-            await self.call("lean_run_at", version=version, line=3, character=2, text="skip")
-        self.assertEqual(error.exception.code, "contentModified")
-        self.assertFalse(any(w.handles for w in self.workers))
 
     async def test_close_during_execution_rejects_and_releases_the_result(self):
         task = asyncio.create_task(self.call("lean_run_at_handle", version=self.version,
@@ -279,8 +430,15 @@ class IntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.pool.handles)
         self.assertFalse(any(w.handles for w in self.workers))
 
-    async def test_uncooperative_cancellation_recycles_the_owning_worker(self):
+    async def test_uncooperative_cancellation_retires_only_its_workspace(self):
         handle = await self.root_handle()
+        owner = next(iter(self.pool.handles.values())).peer
+        other_peer = next(p for p in self.pool.peers.values() if p is not owner)
+        other_peer.busy = 1
+        other, version = await self.second_client()
+        retained = (await other("lean_run_at_handle", version=version, line=3, character=2,
+                                text="constructor"))["next_handle"]
+        other_peer.busy = 0
         generations = [w.generation for w in self.workers]
         task = asyncio.create_task(self.call("lean_run_with", handle=handle, text="pool_sleep"))
         async with asyncio.timeout(5):
@@ -291,9 +449,13 @@ class IntegrationTest(unittest.IsolatedAsyncioTestCase):
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
         async with asyncio.timeout(15):
-            while all(w.generation == old for w,old in zip(self.workers,generations)):
+            while any(w.busy for w in self.workers):
                 await asyncio.sleep(.01)
-        self.assertEqual(sum(w.generation != old for w, old in zip(self.workers, generations)), 1)
+        self.assertEqual([w.generation for w in self.workers], generations)
+        solved = await other("lean_run_with", handle=retained, text="all_goals trivial")
+        self.assertTrue(solved["success"])
+        await other("lean_release", handle=solved["next_handle"])
+        await other("lean_release", handle=retained)
 
     async def test_cooperative_cancellation_and_timeout_preserve_other_clients_handles(self):
         handle = await self.root_handle()

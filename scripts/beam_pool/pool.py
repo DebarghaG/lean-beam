@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 
 from .protocol import (Failure, boolean, fields, natural, relative_path, string)
 from .transport import Emit, rpc
+from .revisions import CHUNK_SIZE, Revisions
 
 
 @dataclass
@@ -27,6 +28,8 @@ class Handle:
     raw: dict
     snapshot: str
     path: str
+    group: str
+    revision: str
     touched: float = field(default_factory=time.monotonic)
     users: int = 0
     consuming: bool = False
@@ -49,7 +52,8 @@ class Job:
 class Pool:
     def __init__(self, endpoints: list[tuple[str, int]], token: str, *, dns: tuple[str, int] | None = None,
                  max_queue: int = 256, per_group: int = 64, max_handles: int = 4096,
-                 timeout: float = 120, handle_ttl: float = 900):
+                 timeout: float = 120, handle_ttl: float = 900,
+                 max_project_bytes: int = 1024 * 1024 * 1024):
         self.endpoints, self.token, self.dns = endpoints, token, dns
         self.max_queue, self.per_group, self.max_handles = max_queue, per_group, max_handles
         self.timeout, self.handle_ttl = timeout, handle_ttl
@@ -65,6 +69,11 @@ class Pool:
         self.closing = False
         self.cursor = 0
         self.expiry_lock = asyncio.Lock()
+        self.projects = Revisions(max_bytes=max_project_bytes)
+
+    def pinned_revisions(self) -> set[str]:
+        return ({h.revision for h in self.handles.values()} |
+                {j.args["revision"] for j in self.jobs if "revision" in j.args})
 
     async def start(self) -> None:
         await self.discover()
@@ -87,6 +96,7 @@ class Pool:
             self.retire(job)
         self.queues.clear()
         self.queued = 0
+        self.projects.close()
 
     async def discover(self) -> None:
         endpoints = set(self.endpoints)
@@ -130,6 +140,7 @@ class Pool:
         while True:
             await asyncio.sleep(1)
             await self.expire_handles()
+            self.projects.collect(self.pinned_revisions())
 
     async def expire_handles(self) -> None:
         async def expire_on_peer(entries: list[tuple[str, Handle]]) -> None:
@@ -152,7 +163,7 @@ class Pool:
                 try:
                     await rpc(peer.endpoint, self.token, "release", {
                         "snapshot": handle.snapshot, "generation": handle.generation,
-                        "path": handle.path, "handle": handle.raw}, timeout=5)
+                        "path": handle.path, "handle": handle.raw, "group": handle.group}, timeout=5)
                 except Failure as error:
                     if error.code == "overloaded":
                         break
@@ -180,6 +191,10 @@ class Pool:
         return handle
 
     async def dispatch(self, op: str, args: dict, emit: Emit) -> dict:
+        if op in {"put", "publish"}:
+            self.projects.collect(self.pinned_revisions())
+            return (self.projects.put(args, self.pinned_revisions()) if op == "put" else
+                    self.projects.publish(args, self.pinned_revisions()))
         if op == "info":
             fields(args, set())
             return {"workers": [{"endpoint": list(p.endpoint), **p.info, "assigned": p.busy}
@@ -197,7 +212,7 @@ class Pool:
             return await rpc(peer.endpoint, self.token, "describe", args)
         handle = None
         if op == "runAt":
-            fields(args, {"snapshot", "path", "line", "character", "text", "store", "group", "source"})
+            fields(args, {"snapshot", "path", "line", "character", "text", "store", "group", "source", "revision"})
             string(args, "snapshot", 128)
             relative_path(string(args, "path", 4096))
             natural(args, "line")
@@ -216,6 +231,12 @@ class Pool:
         else:
             raise Failure("invalidParams", "unknown pool operation")
         group = string(args, "group", 128)
+        if handle and handle.group != group:
+            raise Failure("contentModified", "handle belongs to another workspace")
+        if op == "runAt":
+            revision = self.projects.get(string(args, "revision", 128), group)
+            if revision.snapshot != args["snapshot"]:
+                raise Failure("contentModified", "revision belongs to another prepared project")
         if "source" in args:
             string(args, "source", 3 * 1024 * 1024)
         if self.closing:
@@ -341,7 +362,7 @@ class Pool:
         generation = peer.info["generation"]
         snapshot = job.handle.snapshot if job.handle else job.args["snapshot"]
         path = job.handle.path if job.handle else job.args["path"]
-        common = {"snapshot": snapshot, "generation": generation, "path": path}
+        common = {"snapshot": snapshot, "generation": generation, "path": path, "group": job.group}
 
         async def call(op: str, args: dict) -> dict:
             if op in {"runAt", "runWith"} and "source" in job.args:
@@ -355,8 +376,35 @@ class Pool:
 
         try:
             if job.op == "runAt":
+                revision = self.projects.get(job.args["revision"], job.group)
+                wire = revision.wire() | {"generation": generation}
+                prepared = await rpc(peer.endpoint, self.token, "publish", wire, timeout=self.timeout)
+                fields(prepared, {"revision", "missing"})
+                for digest in prepared["missing"]:
+                    # Every worker asks for only the content absent from its own cache.
+                    if digest not in revision.files.values():
+                        raise Failure("protocolError", "worker requested an unrelated project file")
+                    upload = uuid.uuid4().hex
+                    with self.projects.blob(digest).open("rb") as stream:
+                        offset = 0
+                        size = self.projects.blobs[digest][0]
+                        while True:
+                            chunk = stream.read(CHUNK_SIZE)
+                            last = offset + len(chunk) == size
+                            reply = await rpc(peer.endpoint, self.token, "put", {
+                                "generation": generation, "group": job.group, "upload": upload,
+                                "offset": offset, "data": chunk.hex(), "last": last}, timeout=self.timeout)
+                            offset += len(chunk)
+                            if last:
+                                if reply.get("digest") != digest:
+                                    raise Failure("protocolError", "worker received different project bytes")
+                                break
+                if prepared["missing"]:
+                    prepared = await rpc(peer.endpoint, self.token, "publish", wire, timeout=self.timeout)
+                if prepared.get("revision") != revision.identity:
+                    raise Failure("protocolError", "worker did not accept the project revision")
                 result = await call("runAt", {k: job.args[k] for k in ("line", "character", "text")} |
-                                    {"store": job.args.get("store", False)})
+                                    {"store": job.args.get("store", False), "revision": revision.identity})
             elif job.op == "runWith":
                 result = await call("runWith", {"handle": job.handle.raw, "text": job.args["text"],
                                                 "linear": job.args.get("linear", False)})
@@ -369,7 +417,8 @@ class Pool:
             raw = result.get("next_handle")
             if raw is not None:
                 identity = uuid.uuid4().hex
-                self.handles[identity] = Handle(peer, generation, raw, snapshot, path)
+                revision_id = job.handle.revision if job.handle else job.args["revision"]
+                self.handles[identity] = Handle(peer, generation, raw, snapshot, path, job.group, revision_id)
                 result["next_handle"] = identity
             if not job.result.done():
                 job.result.set_result({"result": result})

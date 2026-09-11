@@ -48,6 +48,8 @@ def parser() -> argparse.ArgumentParser:
     worker.add_argument("--slots", type=positive, default=1)
     worker.add_argument("--timeout", type=positive, default=60)
     worker.add_argument("--max-handles", type=positive, default=4096)
+    worker.add_argument("--max-contexts", type=positive, default=4)
+    worker.add_argument("--max-project-bytes", type=positive, default=1024 * 1024 * 1024)
     worker.add_argument("--idle-ttl", type=positive, default=1800)
     worker.add_argument("--warm-file", action="append", default=[])
     pool = sub.add_parser("serve")
@@ -57,6 +59,7 @@ def parser() -> argparse.ArgumentParser:
     pool.add_argument("--max-queue", type=positive, default=256)
     pool.add_argument("--per-group", type=positive, default=64)
     pool.add_argument("--max-handles", type=positive, default=4096)
+    pool.add_argument("--max-project-bytes", type=positive, default=1024 * 1024 * 1024)
     pool.add_argument("--timeout", type=positive, default=120)
     pool.add_argument("--handle-ttl", type=positive, default=900)
     status = sub.add_parser("status", help="show worker availability and pool counters")
@@ -90,13 +93,14 @@ async def main(args: argparse.Namespace) -> None:
         return
     if args.command == "worker":
         service = Worker(args.root, args.mcp, args.lean, args.plugin, slots=args.slots,
-                         timeout=args.timeout, max_handles=args.max_handles, idle_ttl=args.idle_ttl)
+                         timeout=args.timeout, max_handles=args.max_handles, idle_ttl=args.idle_ttl,
+                         max_contexts=args.max_contexts, max_project_bytes=args.max_project_bytes)
     else:
         if not args.worker and not args.worker_dns:
             raise Failure("invalidParams", "supply at least one --worker or --worker-dns")
         service = Pool(args.worker, token, dns=args.worker_dns, max_queue=args.max_queue,
                        per_group=args.per_group, timeout=args.timeout, max_handles=args.max_handles,
-                       handle_ttl=args.handle_ttl)
+                       handle_ttl=args.handle_ttl, max_project_bytes=args.max_project_bytes)
     server = RpcServer(service.dispatch, token)
     stop = asyncio.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
