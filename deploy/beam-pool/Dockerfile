@@ -13,7 +13,10 @@ RUN case "$TARGETARCH" in arm64) platform=linux_aarch64 ;; amd64) platform=linux
     rm /tmp/lean.tar.zst
 ENV PATH="/opt/lean/bin:${PATH}"
 WORKDIR /opt/beam
-COPY . .
+COPY Beam.lean lakefile.lean lake-manifest.json lean-toolchain LICENSE ./
+COPY Beam ./Beam
+COPY scripts/beam_pool ./scripts/beam_pool
+COPY scripts/beam-pool scripts/lean-beam ./scripts/
 RUN test "$(cat lean-toolchain)" = "leanprover/lean4:v${LEAN_VERSION}" && \
     lake build lean-beam-mcp beam-daemon beam-cli Beam.LSP:shared
 

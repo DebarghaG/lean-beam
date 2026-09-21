@@ -63,6 +63,9 @@ Attach the matching local project as above.
 
 ## Kubernetes
 
+For agents on a separate machine and workers on Tapis Pods, see the
+[Tapis deployment instructions](../deploy/beam-pool/TAPIS.md).
+
 With [kind](https://kind.sigs.k8s.io/docs/user/quick-start/) and `kubectl` installed, use the image
 built above and the same `BEAM_POOL_TOKEN`:
 

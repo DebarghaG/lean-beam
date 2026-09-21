@@ -86,6 +86,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           python3 tests/test-beam-pool.py
+          python3 tests/test-beam-pool-tapis.py
           python3 tests/test-beam-pool-integration.py
 
   mcp-conformance:
