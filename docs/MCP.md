@@ -135,6 +135,15 @@ After editing a lakefile, manifest, package override, `lean-toolchain`, Lean opt
 dynamic libraries, drop that workspace or restart the MCP server before the next request. Re-syncing
 inside the old Lean process is not sufficient to reload workspace configuration.
 
+### Optional Worker Pool
+
+The [worker pool](WORKER_POOL.md) uses the same tool schemas and opaque handles. Set
+`BEAM_LEAN_POOL_CONFIG` and `BEAM_POOL_TOKEN` in the server's environment and restart it to enable
+routing for attached projects. The broker still checks document versions and rejects stale handles.
+Owned workers pass `--respond-to-cancellation` to receive the terminal response after cancellation.
+This lets them wait for execution to stop and release any discarded result's handle before reuse.
+Without that option, client cancellation suppresses the terminal response.
+
 ## Transport Lifetime
 
 The `lean-beam-mcp` stdio process owns its optional in-process broker runtime. MCP clients do not

@@ -1,0 +1,14 @@
+# Send only public build inputs to Docker.
+**
+!Beam.lean
+!Beam/**/*.lean
+!Beam/Native/*.c
+!lakefile.lean
+!lake-manifest.json
+!lean-toolchain
+!LICENSE
+!scripts/beam_pool/*.py
+!deploy/beam-pool/mathlib/lakefile.toml
+!deploy/beam-pool/mathlib/lake-manifest.json
+!deploy/beam-pool/mathlib/lean-toolchain
+!tests/pool_mathlib/Proofs.lean

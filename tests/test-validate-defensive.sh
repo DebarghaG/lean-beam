@@ -80,3 +80,22 @@ if [ ! -d "$outside_root" ]; then
   echo "expected defensive validation wrapper to leave outside temp root intact" >&2
   exit 1
 fi
+
+# A worktree's .git is a file. Copying it would let test commits modify the caller's branch.
+fixture_repo="$outside_root/repo"
+fixture_worktree="$outside_root/worktree"
+mkdir -p "$fixture_repo/scripts"
+cp scripts/validate-defensive.sh "$fixture_repo/scripts/"
+git -C "$fixture_repo" init -q
+git -C "$fixture_repo" add scripts/validate-defensive.sh
+git -C "$fixture_repo" -c user.name=Test -c user.email=test@example.invalid \
+  commit --no-gpg-sign -qm fixture
+git -C "$fixture_repo" worktree add -qb isolated "$fixture_worktree"
+fixture_head="$(git -C "$fixture_worktree" rev-parse HEAD)"
+bash "$fixture_worktree/scripts/validate-defensive.sh" -- bash -ec '
+  test -d .git
+  test "$(git rev-parse --absolute-git-dir)" = "$PWD/.git"
+  git -c user.name=Test -c user.email=test@example.invalid \
+    commit --allow-empty --no-gpg-sign -qm isolated
+'
+test "$(git -C "$fixture_worktree" rev-parse HEAD)" = "$fixture_head"

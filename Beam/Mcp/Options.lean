@@ -12,6 +12,7 @@ structure Options where
   beamCli? : Option String := none
   selfCheckPath? : Option String := none
   showVersion : Bool := false
+  respondToCancellation : Bool := false
 
 def usage : String :=
   String.intercalate "\n" [
@@ -24,6 +25,7 @@ def usage : String :=
     "--self-check starts a child MCP server and calls lean_sync for the current Lean project.",
     "Self-check waits up to 120000 ms per protocol phase by default; override with LEAN_BEAM_MCP_SELF_CHECK_TIMEOUT_MS.",
     "--version prints the MCP server version, protocol revision, and available resolved identity paths.",
+    "--respond-to-cancellation lets owned workers observe completion after cancellation.",
     "The installed wrapper passes --beam-cli automatically so project-specific Lean bundles resolve on demand.",
     "Only curated Lean tools are exposed; raw LSP and broker escape hatches are intentionally absent."
   ]
@@ -40,6 +42,8 @@ partial def parseOptions (opts : Options) : List String → Except String Option
       parseOptions { opts with selfCheckPath? := some path } rest
   | "--version" :: rest =>
       parseOptions { opts with showVersion := true } rest
+  | "--respond-to-cancellation" :: rest =>
+      parseOptions { opts with respondToCancellation := true } rest
   | "-h" :: _ | "--help" :: _ =>
       throw usage
   | arg :: _ =>

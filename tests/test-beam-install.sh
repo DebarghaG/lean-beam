@@ -308,11 +308,12 @@ assert_install_rejects_marker() {
 }
 
 rsync -a \
-  --exclude='.git/' \
+  --exclude='.git' \
   --exclude='.lake/' \
   --exclude='.beam/' \
   --exclude='.codex-worktrees/' \
   ./ "$source_checkout"/
+assert_not_exists "$source_checkout/.git"
 path_no_elan="$(path_without_elan)"
 if PATH="$path_no_elan" command -v elan >/dev/null 2>&1; then
   echo "failed to construct a PATH without elan for the negative install test" >&2

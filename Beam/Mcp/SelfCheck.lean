@@ -18,6 +18,7 @@ structure Options where
   leanCmd? : Option String := none
   leanPlugin? : Option String := none
   beamCli? : Option String := none
+  respondToCancellation : Bool := false
 
 private abbrev stdio : IO.Process.StdioConfig where
   stdin := .piped
@@ -39,7 +40,7 @@ private def timeoutMs : IO Nat := do
       pure timeout
 
 private def childArgs (opts : Options) : List String :=
-  let args := []
+  let args := if opts.respondToCancellation then ["--respond-to-cancellation"] else []
   let args :=
     match opts.beamCli? with
     | some beamCli => args ++ ["--beam-cli", beamCli]

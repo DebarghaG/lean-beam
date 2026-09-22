@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Worker-pool setup and service commands.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+exec python3 -m scripts.beam_pool "$@"

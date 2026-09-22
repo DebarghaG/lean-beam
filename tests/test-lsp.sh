@@ -149,6 +149,7 @@ run_case commandEOF
 run_case commandLoggedError
 run_case commandNoLeak
 run_case commandOutput
+run_case proofAuxiliary
 run_case proofBasis
 run_case proofBasisBefore
 run_case proofBulletBlank

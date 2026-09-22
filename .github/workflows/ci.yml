@@ -82,6 +82,13 @@ jobs:
       - name: Beam Fast Test
         run: bash tests/test-beam-fast.sh
 
+      - name: Lean Worker Pool
+        if: runner.os == 'Linux'
+        run: |
+          python3 tests/test-beam-pool.py
+          python3 tests/test-beam-pool-tapis.py
+          python3 tests/test-beam-pool-integration.py
+
   mcp-conformance:
     name: mcp-conformance (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -179,6 +186,10 @@ jobs:
 
       - name: Beam Install Test
         run: bash tests/test-beam-install.sh
+
+      - name: Defensive Validation Tests
+        if: runner.os == 'Linux'
+        run: bash tests/test-validate-defensive.sh
 
   beam-toolchain-compat:
     name: beam-toolchain-compat (${{ matrix.os }}, ${{ matrix.toolchain }})

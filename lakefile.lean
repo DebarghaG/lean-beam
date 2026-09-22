@@ -24,9 +24,16 @@ lean_lib Beam.LSP where
   globs := #[.andSubmodules `Beam.LSP]
   defaultFacets := #[`shared]
 
+target beamPoolWatchObj (pkg) : FilePath := do
+  let srcFile := pkg.dir / "Beam" / "Native" / "pool_watch.c"
+  let oFile := pkg.buildDir / "native" / "pool_watch.o"
+  let srcTarget ← inputTextFile srcFile
+  buildFileAfterDep oFile srcTarget fun srcFile => do
+    compileO oFile srcFile #["-I", (← getLeanIncludeDir).toString, "-fPIC"]
+
 lean_lib Beam where
   defaultFacets := #[`shared]
-  moreLinkObjs := #[beamControlDirObj]
+  moreLinkObjs := #[beamControlDirObj, beamPoolWatchObj]
 
 lean_lib BeamTest where
   srcDir := "tests/lean"
