@@ -73,6 +73,7 @@ class Worker:
         self.completed = self.failures = self.restarts = 0
         self.lifecycle = asyncio.Lock()
         self.reset_task: asyncio.Task | None = None
+        self.retirements: set[asyncio.Task] = set()
         self.closing = False
         self.idle_ttl = idle_ttl
         self.maintenance = None
@@ -125,6 +126,7 @@ class Worker:
             await asyncio.shield(self.reset_task)
         if self.mcp:
             await self.mcp.close()
+        await asyncio.gather(*self.retirements, return_exceptions=True)
         if self.workspaces:
             await file_io(self.workspaces.cleanup)
         if self.projects:
@@ -154,11 +156,27 @@ class Worker:
         context.retired = True
         self.contexts.pop((context.group, context.environment), None)
         self.handles = {key: h for key, h in self.handles.items() if h.context is not context}
+        old = self.mcp
+        task = asyncio.create_task(old.call("lean_drop_workspace", {
+            "workspace": {"root": str(context.view.root)}}))
+        self.retirements.add(task)
+
+        def finished(task: asyncio.Task) -> None:
+            self.retirements.discard(task)
+            if not task.cancelled():
+                task.exception()
+
+        task.add_done_callback(finished)
         try:
-            async with asyncio.timeout(10):
-                await self.mcp.call("lean_drop_workspace", {"workspace": {"root": str(context.view.root)}})
+            async with asyncio.timeout(15):
+                # MCP drains cancellation; cancelling this call would defeat the deadline.
+                # Keep its response registered until completion or process retirement.
+                await asyncio.shield(task)
         except (TimeoutError, Failure):
-            self.begin_recycle(self.mcp)
+            self.begin_recycle(old)
+        except asyncio.CancelledError:
+            self.begin_recycle(old)
+            raise
         finally:
             if not context.users and context.view.root.exists():
                 await file_io(context.view.close)

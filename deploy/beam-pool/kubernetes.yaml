@@ -45,8 +45,8 @@ spec:
                   name: beam-pool-auth
                   key: token
           resources:
-            requests: {cpu: '1', memory: 2Gi}
-            limits: {cpu: '1', memory: 2Gi}
+            requests: {cpu: '1', memory: 12Gi}
+            limits: {cpu: '1', memory: 12Gi}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

@@ -28,6 +28,13 @@ async def main():
     command = ["docker", "compose", "-p", project, "-f", "deploy/beam-pool/compose.yaml"]
     temporary = tempfile.TemporaryDirectory(prefix="beam-pool-compose-client-")
     state = Path(temporary.name)
+    prepared = state / "prepared"
+    shutil.copytree(REPO / "tests/pool_project", prepared,
+                    ignore=shutil.ignore_patterns(".lake", ".beam"))
+    override = state / "compose.json"
+    override.write_text(json.dumps({"services": {"worker": {
+        "volumes": [f"{prepared}:/project:ro"]}}}))
+    command += ["-f", str(override)]
     native = second = None
 
     def compose(*args):
@@ -58,8 +65,7 @@ async def main():
         status = await operator("status")
         assert sum(w.get("ready", False) for w in status["workers"]) == 2
         local = state / "project"
-        shutil.copytree(REPO / "tests/pool_project", local,
-                        ignore=shutil.ignore_patterns(".lake", ".beam"))
+        shutil.copytree(prepared, local)
         config = state / "pool.json"
         await operator("attach", "--root", str(local), "--config", str(config))
         native = Mcp([

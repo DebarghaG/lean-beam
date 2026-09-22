@@ -31,6 +31,9 @@ async def client():
     endpoint = host, int(port)
     token = os.environ["BEAM_POOL_TOKEN"]
     prepared = Path(os.environ.get("BEAM_POOL_TEST_PROJECT", "/project"))
+    agents = int(os.environ.get("BEAM_POOL_TEST_CLIENTS", "2"))
+    mathlib = os.environ.get("BEAM_POOL_TEST_MATHLIB") == "1"
+    assert agents >= 2
     processes, handles, tasks = [], [], []
 
     async def status():
@@ -71,13 +74,20 @@ async def client():
             except Failure as error:
                 assert error.code == "unauthorized", error
             calls, versions, roots = [], [], []
-            source = (prepared / "Workload.lean").read_text()
+            fixture = "pool_mathlib" if mathlib else "pool_project"
+            proof_path = "Proofs.lean" if mathlib else "Workload.lean"
+            source = (REPO / "tests" / fixture / proof_path).read_text()
             line = source.splitlines().index("  constructor <;> trivial")
-            for number in range(2):
+            for number in range(agents):
                 root = state / f"agent{number}"
                 roots.append(root)
                 shutil.copytree(prepared, root, ignore=shutil.ignore_patterns(".beam"))
                 await attach(root, endpoint, token, config)
+                (root / proof_path).write_text(source)
+                if mathlib:
+                    setup = await asyncio.create_subprocess_exec("lake", "--no-build", "setup-file",
+                        str(root / proof_path), cwd=root, stdout=asyncio.subprocess.DEVNULL)
+                    assert await setup.wait() == 0, "prepared Mathlib dependencies need rebuilding"
                 mcp = Mcp(["env", f"BEAM_LEAN_POOL_CONFIG={config}", f"BEAM_POOL_TOKEN={token}",
                     str(REPO / ".lake/build/bin/lean-beam-mcp"),
                     "--lean-cmd", shutil.which("lean"), "--lean-plugin",
@@ -87,19 +97,40 @@ async def client():
 
                 async def call(name, _mcp=mcp, _root=root, **args):
                     return await _mcp.call(name, {"workspace": {"root": str(_root)},
-                                                 "path": "Workload.lean", **args})
+                                                 "path": proof_path, **args})
 
                 calls.append(call)
                 versions.append((await call("lean_sync"))["version"])
                 handle = (await call("lean_run_at_handle", version=versions[-1],
                                     line=line, character=2, text="constructor"))["next_handle"]
                 handles.append((call, handle))
+                print(f"client {number + 1}/{agents} ready", flush=True)
             failed = await calls[0]("lean_run_at", version=versions[0], line=line,
                                     character=2, text="exact False.elim (by assumption)")
             assert not failed["success"], failed
-            for result in await asyncio.gather(*(calls[i % 2]("lean_run_at", version=versions[i % 2],
+            for result in await asyncio.gather(*(calls[i % agents]("lean_run_at", version=versions[i % agents],
                     line=line, character=2, text="constructor <;> trivial") for i in range(8))):
                 solved(result)
+
+            if mathlib:
+                for tactic in ("ring", "linarith", "positivity", "bv_decide", "native_decide"):
+                    position = source.splitlines().index("  " + tactic)
+                    for result in await asyncio.gather(*(calls[i]("lean_run_at", version=versions[i],
+                            line=position, character=2, text=tactic) for i in range(agents))):
+                        solved(result)
+                    parent = (await calls[0]("lean_run_at_handle", version=versions[0],
+                        line=position, character=2, text="skip"))["next_handle"]
+                    handles.append((calls[0], parent))
+                    branches = await asyncio.gather(*(calls[0]("lean_run_with", handle=parent,
+                        text=tactic) for _ in range(2)))
+                    for branch in branches:
+                        handles.append((calls[0], branch["next_handle"]))
+                        solved(branch)
+                        await calls[0]("lean_release", handle=branch["next_handle"])
+                        handles.pop()
+                    await calls[0]("lean_release", handle=parent)
+                    handles.pop()
+                    print(f"passed: {tactic}", flush=True)
 
             # Occupy both workers, then cancel a queued linear continuation.
             tactic = ("run_tac do\n  for _ in [0:6000] do\n"
@@ -130,18 +161,29 @@ async def client():
             await calls[0]("lean_release", handle=handles[0][1])
             handles.pop(0)
             await calls[0]("lean_close")
-            (roots[0] / "Workload.lean").write_text(source.replace("True ∧ True", "True ∧ (2 = 2)"))
+            (roots[0] / proof_path).write_text(source.replace("True ∧ True", "True ∧ (2 = 2)"))
             version = (await calls[0]("lean_sync"))["version"]
             solved(await calls[0]("lean_run_at", version=version, line=line, character=2,
                                   text="constructor <;> trivial"))
-            call, handle = handles[0]
-            result = await call("lean_run_with", handle=handle, text="all_goals trivial")
-            solved(result)
-            await call("lean_release", handle=result["next_handle"])
-            await call("lean_release", handle=handle)
+            for call, handle in handles:
+                result = await call("lean_run_with", handle=handle, text="all_goals trivial")
+                solved(result)
+                await call("lean_release", handle=result["next_handle"])
+                await call("lean_release", handle=handle)
             handles.clear()
+            if mathlib:
+                await calls[0]("lean_save")
+                assert (roots[0] / ".lake/build/lib/lean/Proofs.olean").is_file()
+                checkpoint = roots[0] / "Proofs/Checkpoint.lean"
+                checkpoint.parent.mkdir(exist_ok=True)
+                checkpoint.write_text("import Proofs\nexample (x y : BitVec 32) : "
+                    "(x &&& y) ||| (x &&& ~~~y) = x := by\n  exact bitvectorDistribution x y\n")
+                checkpoint_version = (await calls[0]("lean_sync", path="Proofs/Checkpoint.lean"))["version"]
+                solved(await calls[0]("lean_run_at", path="Proofs/Checkpoint.lean",
+                    version=checkpoint_version, line=2, character=2, text="exact bitvectorDistribution x y"))
+                print("passed: saved checkpoint import", flush=True)
             final = await until(lambda s: s["running"] == s["queued"] == s["handles"] == 0)
-            print(json.dumps({"test": "pool-tls", "workers": 2, "agents": 2,
+            print(json.dumps({"test": "pool-tls", "workers": 2, "agents": agents, "mathlib": mathlib,
                 "parallel_proofs": 8, "queued_and_running_cancellation": "passed",
                 "cancel_drain_seconds": round(cancel_seconds, 3),
                 "edit_isolation": "passed", "remaining_handles": final["handles"]}), flush=True)
@@ -159,7 +201,6 @@ async def client():
 def local():
     image = os.environ.get("BEAM_POOL_IMAGE", "beam-pool:local")
     project = "beam-tls-" + secrets.token_hex(4)
-    agent_image = project + "-agent"
     with tempfile.TemporaryDirectory(prefix="beam-tls-") as directory:
         state = Path(directory)
         state.chmod(0o755)  # Non-root containers need to traverse the fixture directory.
@@ -176,10 +217,10 @@ def local():
         config = (REPO / "deploy/beam-pool/stunnel.conf").read_text().replace("GATEWAY_HOST", "gateway.test")
         config = config.replace("connect = gateway.test:443", "connect = ingress:443")
         config = config.replace("/etc/ssl/certs/ca-certificates.crt", "/config/server.crt")
+        config = "debug = warning\n" + config
         (state / "stunnel.conf").write_text(config)
-        dockerfile = f"FROM {image}\nUSER root\nRUN apt-get update && apt-get install -y --no-install-recommends stunnel4 && rm -rf /var/lib/apt/lists/*\nUSER 1000:1000\n"
-        subprocess.run(["docker", "build", "-t", agent_image, "-"], input=dockerfile.encode(), check=True)
-        worker = {"image": image, "cpus": 1, "mem_limit": "2g", "init": True,
+        worker = {"image": image, "cpus": 1,
+                  "mem_limit": os.environ.get("BEAM_POOL_TEST_MEMORY", "12g"), "init": True,
                   "environment": {"BEAM_POOL_TOKEN": token}, "networks": ["backend"]}
         services = {"worker1": worker, "worker2": worker,
             "gateway": {**worker, "mem_limit": "1g", "command": ["serve", "--listen", "0.0.0.0:9000",
@@ -187,9 +228,14 @@ def local():
             "ingress": {"image": "traefik:v3.6.2", "networks": ["backend", "frontend"],
                 "volumes": [f"{state}:/config:ro"], "command": ["--entrypoints.web.address=:443",
                     "--providers.file.filename=/config/routes.json", "--log.level=ERROR"]},
-            "agent": {"image": agent_image, "networks": ["frontend"],
-                "environment": {"BEAM_POOL_TOKEN": token}, "volumes": [f"{state}:/config:ro",
-                    f"{Path(__file__).resolve()}:/opt/beam/tests/test-beam-pool-tls.py:ro"],
+            "agent": {"image": image, "networks": ["frontend"],
+                "environment": {"BEAM_POOL_TOKEN": token,
+                    "BEAM_POOL_TEST_CLIENTS": os.environ.get("BEAM_POOL_TEST_CLIENTS", "2"),
+                    "BEAM_POOL_TEST_MATHLIB": os.environ.get("BEAM_POOL_TEST_MATHLIB", "0")},
+                "volumes": [f"{state}:/config:ro",
+                    f"{Path(__file__).resolve()}:/opt/beam/tests/test-beam-pool-tls.py:ro",
+                    f"{REPO / 'tests/pool_mathlib'}:/opt/beam/tests/pool_mathlib:ro",
+                    f"{REPO / 'tests/pool_project'}:/opt/beam/tests/pool_project:ro"],
                 "entrypoint": ["sh", "-c"], "command": ["stunnel /config/stunnel.conf & "
                     "exec python3 /opt/beam/tests/test-beam-pool-tls.py --client"]}}
         compose_file = state / "compose.json"
@@ -199,10 +245,10 @@ def local():
         compose = ["docker", "compose", "-p", project, "-f", str(compose_file)]
         try:
             subprocess.run([*compose, "up", "-d", "worker1", "worker2", "gateway", "ingress"], check=True)
-            subprocess.run([*compose, "run", "--rm", "agent"], check=True, timeout=300)
+            subprocess.run([*compose, "run", "--rm", "agent"], check=True,
+                           timeout=int(os.environ.get("BEAM_POOL_TEST_TIMEOUT", "300")))
         finally:
             subprocess.run([*compose, "down", "--timeout", "15"], check=True)
-            subprocess.run(["docker", "image", "rm", agent_image], check=True)
 
 
 if __name__ == "__main__":

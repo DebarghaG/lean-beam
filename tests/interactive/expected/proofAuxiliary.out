@@ -1,0 +1,5 @@
+{"textDocument":
+ {"version": 1, "uri": "file:///tests/interactive/proofAuxiliary.lean"},
+ "text": "bv_decide",
+ "position": {"line": 4, "character": 2}}
+{"traces": [], "success": true, "proofState": {"goals": []}, "messages": []}

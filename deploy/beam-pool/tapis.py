@@ -96,7 +96,7 @@ def plan(image, prefix, capacity, site, tenant, memory, snapshot=None):
     for number in range(1, capacity + 1):
         identity = f"{prefix}w{number:02}"
         arguments += ["--worker", f"pods-{site}-{tenant}-{identity}:9001"]
-        worker = pod(identity, ["worker", "--root", "/project", "--slots", "1",
+        worker = pod(identity, ["worker", "--root", "/project", "--slots", "1", "--timeout", "105",
             "--listen", "0.0.0.0:9001"], 9001, "local_only", memory)
         if snapshot:
             worker["volume_mounts"] = {"/project": {
@@ -185,7 +185,7 @@ def main():
     render.add_argument("--capacity", type=int, default=20)
     render.add_argument("--site", default="tacc")
     render.add_argument("--tenant", default="tacc")
-    render.add_argument("--memory", type=int, default=2048, help="MiB per worker; size for your project")
+    render.add_argument("--memory", type=int, default=12288, help="MiB per worker; size for your project")
     render.add_argument("--snapshot", help="prepared Tapis snapshot to mount at /project")
     create = commands.add_parser("up", help="create/start workers and gateway; never scale down")
     create.add_argument("plan", type=Path)

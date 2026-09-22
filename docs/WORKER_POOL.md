@@ -10,7 +10,6 @@ that, Beam sends source edits, new files, and changed build artifacts automatica
 gets private worker workspaces over the prepared dependencies. Agents keep their usual edit,
 sync, probe, and save workflow; edited imports still need the usual save and refresh steps.
 Use separate local worktrees for agents that edit independently.
-The example project imports only the Lean standard library, already included in the image.
 Pool clients and workers require Linux; the pool scripts also require Python 3.11 or later.
 
 ## Run locally
@@ -50,16 +49,19 @@ Use `--help` on each command for limits and endpoint options.
 
 ## Containers
 
-The example image includes the small project in `tests/pool_project`. Replace it with your prepared
-project for real use.
+The image includes a pinned Mathlib environment. Attach a matching copy on the agent machine,
+then add your proofs through normal source synchronization.
+Use `Proofs.lean` or `Proofs/` for the image's registered Lean library; this also supports saving
+and importing checkpoints.
 
 ```bash
 docker build -f deploy/beam-pool/Dockerfile -t beam-pool:local .
 docker compose -f deploy/beam-pool/compose.yaml up -d --scale worker=4
 ```
 
-The Compose file gives each worker a one-CPU quota. This does not pin it to a particular core.
-Attach the matching local project as above.
+The Compose file gives each worker a one-CPU quota and 12 GiB of memory. This does not pin it
+to a particular core. Set `BEAM_POOL_WORKER_MEMORY` to change the memory limit after measuring
+your workload. Attach the matching local project as above.
 
 ## Kubernetes
 

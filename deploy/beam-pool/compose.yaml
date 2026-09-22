@@ -4,7 +4,7 @@ services:
     image: ${BEAM_POOL_IMAGE:-beam-pool:local}
     init: true
     cpus: 1
-    mem_limit: 2g
+    mem_limit: ${BEAM_POOL_WORKER_MEMORY:-12g}
     pids_limit: 256
     environment:
       BEAM_POOL_TOKEN: ${BEAM_POOL_TOKEN:?Set a random shared capability}

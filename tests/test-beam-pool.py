@@ -33,6 +33,41 @@ class ProtocolTest(unittest.TestCase):
 
 
 class McpLifetimeTest(unittest.IsolatedAsyncioTestCase):
+    async def test_workspace_retirement_bounds_a_cancellation_draining_call(self):
+        worker = Worker(Path.cwd(), Path("unused"), Path("unused"), Path("unused"))
+        release = asyncio.Event()
+        completed = asyncio.Event()
+
+        async def call(*args):
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                # MCP waits for the terminal response after sending cancellation.
+                await release.wait()
+            completed.set()
+            return {}
+
+        worker.mcp = SimpleNamespace(call=call)
+        worker.begin_recycle = Mock()
+        context = SimpleNamespace(group="a", environment="e", users=0, retired=False,
+                                  view=SimpleNamespace(root=Path.cwd(), close=Mock()))
+        worker.contexts[("a", "e")] = context
+        timeout = asyncio.timeout
+        task = None
+        try:
+            with patch("scripts.beam_pool.worker.asyncio.timeout", side_effect=lambda _: timeout(.02)):
+                task = asyncio.create_task(worker.drop_context(context))
+                done, _ = await asyncio.wait({task}, timeout=.2)
+            self.assertIn(task, done, "workspace retirement ignored its deadline")
+            await task
+            worker.begin_recycle.assert_called_once_with(worker.mcp)
+            self.assertFalse(completed.is_set())
+        finally:
+            release.set()
+            if task:
+                await task
+        await asyncio.wait_for(completed.wait(), 1)
+
     async def test_tool_errors_use_the_typed_mcp_contract(self):
         mcp = Mcp([], str(Path.cwd()), 1)
         error = {"code": "contentModified", "message": "source changed", "data": {"version": 3}}

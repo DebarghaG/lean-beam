@@ -1,14 +1,24 @@
 # Tapis
 
-Agents run the usual Beam CLI/MCP on their own Linux machine. Tapis runs one gateway and
-one-CPU workers. A local stunnel process connects Beam's TCP client to Tapis's TLS/SNI ingress.
+Agents run the usual Beam CLI/MCP on their own Linux machine. The default Tapis plan runs one
+gateway and one-CPU workers. A local stunnel process connects Beam to Tapis's TLS/SNI ingress.
 
 Build and publish the [pool image](Dockerfile) with a fixed release tag. Have a Tapis
 administrator allowlist its repository. Workers for one project need the same architecture and
 runtime. Use the same Lean version and compatible native artifacts on the agent machine.
-The bundled `/project` is a small public smoke-test project.
-Keep private projects in a Tapis snapshot, not in a public image; copy the same prepared
-sources and build artifacts to the agent machine before attaching.
+The image includes Lean 4.33 and a prepared Mathlib environment at `/project`, without an
+example proof. Use the same image and platform for workers and agent-side MCP. Attach a copy of
+`/project` before adding private proof files; Beam sends source edits to the workers.
+Put proofs in `Proofs.lean` or under `Proofs/`, the workspace's registered Lean library.
+Private dependencies need an identical prepared snapshot on both sides.
+Workloads, credentials, and benchmark results stay outside the image.
+
+```bash
+docker build -f deploy/beam-pool/Dockerfile -t YOUR_ACCOUNT/lean-beam:YOUR_RELEASE .
+BEAM_POOL_IMAGE=YOUR_ACCOUNT/lean-beam:YOUR_RELEASE BEAM_POOL_TEST_MATHLIB=1 \
+  BEAM_POOL_TEST_CLIENTS=4 BEAM_POOL_TEST_MEMORY=12g BEAM_POOL_TEST_TIMEOUT=1200 \
+  python3 tests/test-beam-pool-tls.py
+```
 
 ## Create the pool
 
@@ -30,9 +40,13 @@ It creates a shared Tapis secret, two workers, and the gateway. Rerunning with `
 adds workers without restarting the gateway. The plan reserves addresses for up to 20 workers;
 it only creates the requested number. It never stops or replaces existing pods.
 
-For a real project, add `--snapshot SNAPSHOT_ID --memory MIB` when making the plan.
-The snapshot must contain the prepared project at its root. The 2048 MiB default is for the
-small test project. Pods stop after 12 hours by default; change `time_to_stop_default` to `-1`
+Workers default to 12 GiB for Mathlib and up to four cached client workspaces. Use `--memory MIB`
+to change this after measuring your workload. For other prepared dependencies, add
+`--snapshot SNAPSHOT_ID`; the snapshot must contain the prepared project at its root.
+The Tapis plan allows 105 seconds per worker request, including workspace initialization.
+The client's 120-second deadline includes queueing, so bursts of new Mathlib workspaces can
+still time out. Measure cold starts separately from warm proof requests.
+Pods stop after 12 hours by default; change `time_to_stop_default` to `-1`
 in the plan before creating a long-lived service. Gateway restarts lose all handles.
 
 `--site` and `--tenant` default to `tacc`. Worker addresses use Tapis's current internal service
@@ -76,18 +90,18 @@ python3 tests/test-beam-pool-tapis.py
 BEAM_POOL_IMAGE=YOUR_ACCOUNT/lean-beam:YOUR_RELEASE python3 tests/test-beam-pool-tls.py
 ```
 
-The Docker test uses two workers, Traefik v3.6.2, stunnel, and two real MCP agents. It checks
+The Docker test uses two workers, Traefik v3.6.2, stunnel, and two MCP clients by default. It checks
 concurrent proofs, rejected tactics, queued/running cancellation, retained handles, and source
 isolation. It removes its containers afterward. It does not contact Tapis.
 
 For a dedicated two-worker Tapis pilot, run the same test with `--client`, setting
-`BEAM_POOL_TOKEN`, `BEAM_POOL_TEST_PROJECT` to a copy of `tests/pool_project`, and optionally
-`BEAM_POOL_TEST_ENDPOINT` to the local adapter address. This needs a built Beam checkout.
+`BEAM_POOL_TOKEN`, `BEAM_POOL_TEST_PROJECT` to the matching prepared environment, and optionally
+`BEAM_POOL_TEST_ENDPOINT` to the local adapter address. Set `BEAM_POOL_TEST_MATHLIB=1` for Mathlib.
+That mode also checks native-code tactics and importing a saved checkpoint on a worker.
+This needs the test script, its fixture, and matching Beam binaries on the agent machine.
 
-Tested on the live `tacc` tenant on 2026-09-21 with two one-CPU workers and two external MCP
-agents: eight concurrent proofs, rejected tactics, queued/running cancellation, retained handles,
-and isolated source edits. TLS verification and internal worker DNS passed. Repeating `up` left
-the running pods unchanged. This used only `tests/pool_project`; large projects and scale-up
-remain untested on Tapis.
+Tested on the live `tacc` tenant on 2026-09-21 with two one-CPU workers. The `tests/pool_project`
+pilot covered eight concurrent proofs, rejected tactics, cancellation, handles, and isolated edits.
+TLS verification, internal worker DNS, and repeatable `up` passed.
 
 Platform reference: [Tapis Pods](https://tapis.readthedocs.io/en/latest/technical/pods.html).

@@ -46,7 +46,7 @@ def runMetaM (p : ProofSnapshot) (t : MetaM α) : IO (α × ProofSnapshot) := do
 
 def runTermElabM (p : ProofSnapshot) (t : TermElabM α) : IO (α × ProofSnapshot) := do
   let ((a, termState), p') ←
-    p.runMetaM (Term.TermElabM.run (s := p.termState) do
+    p.runMetaM (Term.TermElabM.run (ctx := p.termContext) (s := p.termState) do
       let r ← t
       Term.synthesizeSyntheticMVarsNoPostponing
       pure r)
@@ -58,7 +58,9 @@ def runTacticM (p : ProofSnapshot) (t : TacticM α) : IO (α × ProofSnapshot) :
 
 def create (ctx : Elab.ContextInfo) (goals : List MVarId) (types : List Expr := []) :
     IO ProofSnapshot := do
-  ctx.runMetaM {} do
+  -- Auxiliary declarations must use the theorem's permitted declaration prefix.
+  let declName? := ctx.env.asyncPrefix?.orElse fun _ => ctx.parentDecl?
+  ctx.runMetaM {} <| withDeclNameForAuxNaming (declName?.getD .anonymous) do
     let goals := goals ++ (← types.mapM fun t => Expr.mvarId! <$> Meta.mkFreshExprMVar (some t))
     pure {
       coreState := ← getThe Core.State
@@ -66,7 +68,7 @@ def create (ctx : Elab.ContextInfo) (goals : List MVarId) (types : List Expr := 
       metaState := ← getThe Meta.State
       metaContext := ← readThe Meta.Context
       termState := {}
-      termContext := {}
+      termContext := { declName? }
       tacticState := { goals }
       -- Editor-style tactic recovery is useful for collecting later diagnostics, but an isolated
       -- runAt probe should report the direct tactic failure. With recovery enabled, term
