@@ -4,7 +4,7 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Author: Emilio J. Gallego Arias
 -/
 
-import Lean.Compiler.IR
+import Lean.Compiler
 import Lean.Elab.Term
 import Lean.Shell
 import Lean.Server.FileWorker.RequestHandling
@@ -50,6 +50,7 @@ structure ModuleArtifactPaths where
   oleanServerFile : String
   oleanPrivateFile : String
   irFile : String
+  irSigFile? : Option String := none
   deriving FromJson, Repr, ToJson
 
 /-- Internal request payload for artifact serialization from the current worker snapshot. -/
@@ -304,6 +305,7 @@ private structure ModuleArtifactTargets where
   oleanServerFile : System.FilePath
   oleanPrivateFile : System.FilePath
   irFile : System.FilePath
+  irSigFile? : Option System.FilePath := none
 
 private def moduleArtifactFiles
     (env : Environment)
@@ -317,6 +319,8 @@ private def moduleArtifactFiles
     files := files.push targets.oleanServerFile
     files := files.push targets.oleanPrivateFile
     files := files.push targets.irFile
+    if let some irSigFile := targets.irSigFile? then
+      files := files.push irSigFile
   else
     unless moduleTargets?.isNone do
       throw <| IO.userError
@@ -326,18 +330,25 @@ private def moduleArtifactFiles
 private def stageModuleArtifacts
     (env : Environment)
     (oleanFile : System.FilePath)
+    (hasIRSignature : Bool)
     (moduleArtifacts : Array StagedArtifact) : IO Unit := do
   withTempSiblingDir oleanFile fun tmpDir => do
     let some fileName := oleanFile.fileName
       | throw <| IO.userError s!"module artifact path has no file name: {oleanFile}"
     let stagedOlean := tmpDir / fileName
     Lean.writeModule env stagedOlean
-    let generated :=
+    let stagedIRSignature := stagedOlean.withExtension "ir.sig"
+    if env.header.isModule && (← stagedIRSignature.pathExists) != hasIRSignature then
+      throw <| IO.userError
+        "module IR signature output path does not match this Lean build's artifact family"
+    let mut generated :=
       if env.header.isModule then
         #[stagedOlean, stagedOlean.addExtension "server", stagedOlean.addExtension "private",
           stagedOlean.withExtension "ir"]
       else
         #[stagedOlean]
+    if hasIRSignature then
+      generated := generated.push stagedIRSignature
     unless generated.size == moduleArtifacts.size do
       throw <| IO.userError "internal module artifact staging mismatch"
     for path in generated do
@@ -481,6 +492,24 @@ private def saveBlockingCommandMessages
     completionBlocking := false
   }
 
+-- The option can be scoped to a declaration and reset by EOF while compilation remains pending.
+-- Older supported Lean versions have no postponed-compilation extension.
+elab "hasPostponedCompilation(" env:term ")" : term => do
+  if (← getEnv).contains `Lean.Compiler.LCNF.postponedCompileDeclsExt then
+    Lean.Elab.Term.elabTerm (← `(term|
+      !(Lean.Compiler.LCNF.postponedCompileDeclsExt.getState $env).isEmpty)) none
+  else
+    Lean.Elab.Term.elabTerm (← `(term| (let _ := $env; false))) none
+
+def saveReadinessDeferredCompilationReason : String := "deferredCompilation"
+
+private def deferredCompilationMessage? (state : Elab.Command.State) : Option String :=
+  if state.scopes.head!.opts.getBool `compiler.postponeCompile false ||
+      hasPostponedCompilation(state.env) then
+    some "Beam cannot save deferred compilation from compiler.postponeCompile; use lake build instead."
+  else
+    none
+
 def collectSaveReadiness
     (doc : Lean.Server.FileWorker.EditableDocument) :
     RequestM
@@ -521,7 +550,8 @@ def collectSaveReadiness
       blockingCommandMessages := fallbackBlockingCommandMessages
       : SaveReadinessResult
     }, none, diagnosticErrors, commandErrors)
-  let saveReady := frontendErrorCount == 0
+  let deferredMessage? := deferredCompilationMessage? cmdState
+  let saveReady := frontendErrorCount == 0 && deferredMessage?.isNone
   let readiness : SaveReadinessResult := {
     version := doc.meta.version
     textHash
@@ -529,11 +559,16 @@ def collectSaveReadiness
     currentWarningCount :=
       if frontendWarningCount == 0 then diagnosticWarnings.size else frontendWarningCount
     saveReady := saveReady
-    saveReadyReason := if saveReady then "ok" else saveReadinessDocumentErrorsReason
+    saveReadyReason :=
+      if frontendErrorCount != 0 then saveReadinessDocumentErrorsReason
+      else if deferredMessage?.isSome then saveReadinessDeferredCompilationReason
+      else "ok"
     saveReadyMessage? :=
-      if saveReady then none else some (saveArtifactsErrorMessage diagnosticErrors commandErrors)
+      if frontendErrorCount != 0 then some (saveArtifactsErrorMessage diagnosticErrors commandErrors)
+      else deferredMessage?
     blockingDiagnostics := if saveReady then #[] else frontendBlockingDiagnostics
-    blockingCommandMessages := if saveReady then #[] else frontendBlockingCommandMessages
+    blockingCommandMessages := frontendBlockingCommandMessages ++
+      saveBlockingCommandMessages deferredMessage?.toArray
   }
   pure (readiness, some cmdState, diagnosticErrors, commandErrors)
 
@@ -545,7 +580,8 @@ def saveCurrentArtifacts
   checkExpectedDocument doc p.expectedVersion p.expectedTextHash
   let (readiness, cmdState?, diagnosticErrors, commandErrors) ← collectSaveReadiness doc
   unless readiness.saveReady do
-    throw <| RequestError.invalidParams (saveArtifactsErrorMessage diagnosticErrors commandErrors)
+    throw <| RequestError.invalidParams <| readiness.saveReadyMessage?.getD
+      (saveArtifactsErrorMessage diagnosticErrors commandErrors)
   let some cmdState := cmdState?
     | throw <| RequestError.invalidParams "document did not elaborate successfully"
   let env := cmdState.env
@@ -555,6 +591,7 @@ def saveCurrentArtifacts
     oleanServerFile := mkFilePath paths.oleanServerFile
     oleanPrivateFile := mkFilePath paths.oleanPrivateFile
     irFile := mkFilePath paths.irFile
+    irSigFile? := paths.irSigFile?.map mkFilePath
   } : ModuleArtifactTargets)
   let ileanFile := mkFilePath p.ileanFile
   let cFile := mkFilePath p.cFile
@@ -566,7 +603,8 @@ def saveCurrentArtifacts
   let trees := snaps.toArray.map (·.infoTree)
   try
     let moduleArtifacts := stagedArtifacts.extract 0 moduleFiles.size
-    stageModuleArtifacts env oleanFile moduleArtifacts
+    stageModuleArtifacts env oleanFile
+      (moduleTargets?.any fun targets => targets.irSigFile?.isSome) moduleArtifacts
     let ileanArtifact ← stagedArtifactAt stagedArtifacts moduleFiles.size "ilean"
     writeIlean doc.meta doc.initSnap.stx mainModule trees ileanArtifact.staged
     let cOutput ← emitCForSavedModule(env, mainModule)
