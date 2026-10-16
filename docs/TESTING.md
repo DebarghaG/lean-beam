@@ -312,6 +312,33 @@ build the local fixture under CI contention. Keep `--timeout 30` for local repro
 are specifically checking the CI budget. The focused daemon lifecycle fixture explicitly prebuilds
 its toolchain into one owned shared cache before timing daemon startup, so cold bundle compilation
 is not misdiagnosed as a daemon-readiness timeout.
+
+MCP self-check is an installation smoke test with one best-effort timeout covering discovery,
+sync, and shutdown, including stderr draining. Success verifies discovery of the supported protocol
+and a correctly shaped `lean_sync` result. It does not require completed elaboration (`done: true`),
+a file without Lean diagnostics, or readiness to save artifacts; those have separate sync/save tests.
+Protocol fixtures reject malformed response envelopes and progress fields, check that notifications
+cannot restart the budget, and cover EOF shutdown stalls and early child exits. The existing
+`Beam.StderrCapture` drains diagnostics concurrently and retains at most the final 64 KiB for failure
+reporting; successful probes do not replay diagnostic stderr.
+Process creation and failure cleanup are outside the budget; blocked I/O can still delay process
+exit. The fast suite and
+installed-wrapper suite supervise it using `tests/lib/process_watchdog.py`, with
+`BEAM_MCP_SELF_CHECK_WATCHDOG_SECONDS` defaulting to 600 seconds. The MCP protocol test executable,
+which includes self-check child fixtures, has a separate 240-second external watchdog configurable
+with `BEAM_MCP_PROTOCOL_TEST_WATCHDOG_SECONDS`.
+
+The watchdog captures stdout/stderr in files and reads at most the final 1 MiB of each, so inherited
+writers cannot keep output collection waiting for EOF. This bounds the returned strings, not disk
+usage: the temporary capture files can grow while the command runs. On timeout it exits 124 after
+cleanup, targeting only its owned POSIX process group or its Windows process tree through
+[`taskkill /PID ... /T /F`](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/taskkill).
+Process creation is outside the wait deadline; cleanup has separate five-second bounds for the
+Windows tree-termination command and direct-child reaping. `python3 tests/test-process-watchdog.py`
+checks successful logging, nonzero exit, bounded returned output, and timeout with inherited output,
+a partial response, and actual descendant termination. Windows execution still needs qualification
+on a Windows runner.
+
 The focused CLI daemon test also checks that a failed stderr evidence sink does not stop pipe
 draining, that sink failure observation is synchronized, and that a pipe held open past leader exit
 produces a bounded `pipeStillOpen` outcome rather than an unbounded task join.
