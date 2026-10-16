@@ -21,6 +21,20 @@ permissions:
   contents: read
 
 jobs:
+  toolchains:
+    name: toolchains
+    runs-on: ubuntu-latest
+    outputs:
+      toolchains: ${{ steps.matrix.outputs.toolchains }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate and export toolchains
+        id: matrix
+        run: |
+          toolchains="$(python3 scripts/ci-toolchains.py)"
+          printf 'toolchains=%s\n' "$toolchains" >> "$GITHUB_OUTPUT"
+
   macos-platform:
     name: macos-platform
     if: vars.BEAM_FULL_MACOS_CI != 'true'
@@ -222,16 +236,13 @@ jobs:
 
   beam-toolchain-compat:
     name: beam-toolchain-compat (${{ matrix.os }}, ${{ matrix.toolchain }})
+    needs: toolchains
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: ${{ fromJSON(vars.BEAM_FULL_MACOS_CI == 'true' && '["ubuntu-latest","macos-latest"]' || '["ubuntu-latest"]') }}
-        toolchain:
-          - leanprover/lean4:v4.36.0-rc1
-          - leanprover/lean4:v4.35.0
-          - leanprover/lean4:v4.34.1
-          - leanprover/lean4:v4.33.1
+        toolchain: ${{ fromJSON(needs.toolchains.outputs.toolchains) }}
     steps:
       - uses: actions/checkout@v6
 

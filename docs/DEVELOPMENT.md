@@ -685,8 +685,10 @@ Exact validated Lean toolchains live in
 lives in [compatible-lean-release-lines](../compatible-lean-release-lines). Use those registries,
 not this maintainer note, as the source of truth. Keep one exact toolchain per release line: its
 latest stable point release, or the pinned RC before that line has a stable release. Other RCs and
-superseded stable points use local qualification. The CI matrix guard checks canonical entries,
-one per line, inclusion of the pinned default, and rejection of every unpinned RC.
+superseded stable points use local qualification.
+[scripts/ci-toolchains.py](../scripts/ci-toolchains.py) checks canonical entries, one per line,
+inclusion of the pinned default, and rejection of every unpinned RC. It emits the validated entries
+as a JSON array for the compatibility matrix; the workflow does not maintain another version list.
 
 The remaining shim spans the supported stable releases, 4.36 RC, and pinned nightly development
 target. Re-check it when those targets change and delete obsolete compatibility code rather than

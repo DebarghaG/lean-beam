@@ -84,7 +84,7 @@ Run the LSP surface when the change touches request semantics, proof-vs-command 
 Default Beam entrypoints:
 
 - [tests/test-beam-fast.sh](../tests/test-beam-fast.sh): fast broker stream, barrier, request-contract,
-  MCP projection, HTTP bridge, self-check, and toolchain CI-matrix guard coverage
+  MCP projection, HTTP bridge, self-check, and toolchain registry/matrix coverage
 - [tests/test-beam-slow.sh](../tests/test-beam-slow.sh): wrapper, MCP stdio stress and
   multi-toolchain workspace coverage, sandbox-wrapper, and save-replay coverage
 - [tests/test-beam-install.sh](../tests/test-beam-install.sh): installer and installed-runtime layout
@@ -392,6 +392,17 @@ modes. The combined macOS job runs toolchain qualification once at the repositor
 version. Full mode runs the complete per-version macOS compatibility matrix.
 Installer tests still prebuild every toolchain in `validated-lean-toolchains`.
 
+The Linux `toolchains` job runs [scripts/ci-toolchains.py](../scripts/ci-toolchains.py) to validate
+the registries and publish the JSON array consumed by `beam-toolchain-compat`. Invalid, empty,
+duplicate, or policy-inconsistent registries fail that job before a matrix is published. The helper
+uses only Python's standard library and can be run locally with `python3 scripts/ci-toolchains.py`.
+It writes one compact JSON array to stdout on success, or diagnostics to stderr with a nonzero exit
+status on failure. Release selection remains a maintainer decision; this offline helper checks the
+committed policy.
+[tests/test-toolchain-ci-matrix.py](../tests/test-toolchain-ci-matrix.py) checks generation and
+rejection behavior using fixed synthetic policy cases, plus an integration check of the checked-in
+registries, without parsing workflow YAML.
+
 The variable belongs to the repository running the workflow. A fork-originated PR running in
 `leanprover/lean-beam` therefore uses the upstream repository's setting. To enable full mode in a
 fork and request a run for a branch, replace `OWNER/REPO` with that fork's repository:
@@ -403,6 +414,7 @@ gh workflow run ci.yml --repo OWNER/REPO --ref BRANCH
 
 The current GitHub Actions workflow maps to the testing surfaces like this:
 
+- `toolchains`: registry validation and compatibility-matrix generation as described above
 - `macos-platform`: the combined macOS job described above
 - `lsp`: [tests/test-lsp.sh](../tests/test-lsp.sh)
 - `beam-fast`: [tests/test-beam-fast.sh](../tests/test-beam-fast.sh)

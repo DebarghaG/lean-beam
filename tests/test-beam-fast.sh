@@ -19,7 +19,7 @@ export BEAM_SESSION_ROOT="$beam_fast_state_root/sessions"
 bash scripts/check-daemon-safety.sh
 bash scripts/check-task-priority.sh
 bash scripts/check-markdown-links.sh
-bash scripts/check-toolchain-ci-matrix.sh
+python3 scripts/ci-toolchains.py > /dev/null
 python3 tests/test-toolchain-ci-matrix.py
 python3 tests/test-toolchain-compat-owner.py
 python3 tests/test-installed-mcp-smoke.py
