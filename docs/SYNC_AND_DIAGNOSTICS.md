@@ -29,6 +29,31 @@ version from `lean-beam update`, the internal broker `update_file` operation, or
 `lean-beam sync`, the internal broker `sync_file` operation, and MCP `lean_sync` also return the
 current version when the caller needs the diagnostics/readiness barrier.
 
+Each captured source snapshot carries three internal hash representations for two text identities:
+the saved source text and the document text accepted by Lean after CRLF line endings become LF.
+
+| Representation | Input and consumer |
+| --- | --- |
+| `rawSourceHash` | Hash of the unnormalized saved source; controls document versions, disk freshness and checkpoint invalidation. |
+| `documentHash` | Hash of Lean's normalized document; checks that diagnostics and saved artifacts belong to the accepted document version and text. |
+| `lakeTraceHash` | `Lake.Hash.ofText` of the saved source; supplies the normalized source hash Lake expects in build traces. |
+
+The document and Lake hashes share normalized input, but Lake applies its own hash mixing. They
+are different representations rather than independent content identities. Beam keeps the result
+of Lake's supported `Hash.ofText` operation instead of duplicating its hashing recipe or making
+the LSP worker depend on Lake's hash representation.
+
+`DocumentState.FileSnapshot.ofText` computes all three values from one captured source text. Both
+the file snapshot and tracked document state require an explicit document hash; it cannot default
+to the raw source hash, since those values differ when CRLF normalization changes the text. An
+accepted snapshot carries these values together through sync and save, including when concurrent
+file reads finish out of order.
+
+For an LF-to-CRLF edit, the raw source hash changes, the document version advances, and the previous
+checkpoint is invalidated. The normalized document and Lake source trace identities stay the same.
+Sync and save preserve the source file's saved bytes, and a valid saved artifact family can still
+be replayed by Lake without recompilation.
+
 When the broker rejects a position- or range-bound request because the supplied version is stale,
 the failure uses `contentModified` and includes `error.data.reason = "documentVersionMismatch"`.
 The same payload reports `expectedVersion`, the currently accepted `acceptedVersion`, and
@@ -201,17 +226,23 @@ They always report `updates` and `done`; when Lean publishes range-bearing progr
 report `rangeStartLine` and/or `rangeEndLine`; MCP spells these `range_start_line` and
 `range_end_line`. The range end is the upper line bound reported by
 Lean's progress ranges, not the source file's line count; diagnostics may legitimately refer to
-lines beyond it. The final response contains the latest observation available when that response is
-constructed, so it may be newer than the last live broker event or throttled MCP notification. An
-operation can also reuse a previously observed value without emitting live file progress; `updates`
-is not a count of work performed by the current request. Use these fields for coarse UI progress
+lines beyond it. The final response retains the latest observed counters and ranges available when
+that response is constructed, so they may be newer than the last live broker event or throttled MCP
+notification. An operation can also reuse a previously observed value without emitting live file
+progress; `updates` is not a count of work performed by the current request. Use these fields for coarse UI progress
 only. Final machine decisions should use the readiness and diagnostic result fields. MCP includes
 final `document_progress` only for `lean_sync`, `lean_refresh`, `lean_save`, and
 `lean_close_save`; it is not inherited by `runAt` or unrelated tools.
 
-For `sync`, `refresh`, `save`, and `close-save`, completed Lean file progress is one input to the
-diagnostics-complete barrier. For non-barrier calls, file progress may be partial because the
-request can return before the whole file reaches `done = true`.
+For `sync`, `refresh`, `save`, and `close-save`, the internal diagnostics barrier waits for Lean's
+reporter and command snapshots, then reports `hasFatalSnapshot`: whether a snapshot contains a
+fatal stop preventing further file processing. Ordinary elaboration errors do not set this flag;
+they can finish processing while still blocking artifact save through `readiness.saveReady`.
+The final progress `done` value is derived from the barrier's fatal-snapshot status and dependency
+checks. A delayed busy progress notification cannot reject a completed barrier, and an observed
+done notification cannot override a fatal snapshot or a stale-dependency veto. For non-barrier
+calls, file progress may be partial because the request can return before the whole file reaches
+`done = true`.
 
 ## Readiness
 

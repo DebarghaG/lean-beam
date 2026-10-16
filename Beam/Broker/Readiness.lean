@@ -32,9 +32,13 @@ def decideSyncBarrier
     (version : Nat)
     (priorProgress? : Option SyncFileProgress)
     (progress? : Option SyncFileProgress)
+    (hasFatalSnapshot : Bool)
     (diagnostics : Array Diagnostic) : SyncBarrierDecision :=
-  let fileProgress? := effectiveSyncBarrierProgress priorProgress? progress? diagnostics
-  let incomplete := syncBarrierIncomplete? fileProgress? diagnostics
+  -- The barrier has waited for document processing. Its snapshot's fatal status is authoritative;
+  -- Lean's asynchronous final progress notification may still be delayed at the broker.
+  let incomplete := hasFatalSnapshot || diagnosticsIndicateIncompleteBarrier diagnostics
+  let progress := (progress?.or priorProgress?).getD {}
+  let fileProgress? := some { progress with done := !incomplete }
   {
     fileProgress?
     incomplete

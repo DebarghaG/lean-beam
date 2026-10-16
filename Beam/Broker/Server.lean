@@ -798,13 +798,7 @@ private def readFileSyncSnapshot
     path
     uri
     text
-    file := {
-      textHash := hash text
-      textTraceHash := Lake.Hash.ofText text
-      textMTime
-      readSeq
-      moduleName?
-    }
+    file := DocumentState.FileSnapshot.ofText backend text textMTime readSeq moduleName?
   }
 
 private def workspaceForSnapshot
@@ -1729,8 +1723,8 @@ private structure StartedTrackedBarrier where
   leanConfig? : Option LeanBackendConfig
   uri : DocumentUri
   version : Nat
-  textHash : UInt64
-  textTraceHash : Lake.Hash
+  documentHash : UInt64
+  lakeTraceHash : Lake.Hash
   textMTime : Lake.MTime
   changed : Bool := false
   priorProgress? : Option SyncFileProgress := none
@@ -1774,8 +1768,8 @@ private def startTrackedDiagnosticsBarrierIO
         leanConfig? := workspace.config.lean?
         uri
         version := synced.version
-        textHash := docState.textHash
-        textTraceHash := docState.textTraceHash
+        documentHash := docState.documentHash
+        lakeTraceHash := docState.lakeTraceHash
         textMTime := docState.textMTime
         changed := synced.changed
         priorProgress? := docState.fileProgress?
@@ -1889,13 +1883,15 @@ private def syncBarrierOutcome
     (started : StartedTrackedBarrier)
     (progress? : Option SyncFileProgress)
     (diagnosticsSeen : Bool)
+    (hasFatalSnapshot : Bool)
     (observedDiagnostics : Array Diagnostic)
     (directImports : Array String)
     (currentDiagnostics : Array Diagnostic) : HandlerM SyncBarrierOutcome := do
   let completionDiagnostics :=
     if diagnosticsSeen then observedDiagnostics else currentDiagnostics
   let decision :=
-    decideSyncBarrier started.uri started.version started.priorProgress? progress? completionDiagnostics
+    decideSyncBarrier started.uri started.version started.priorProgress? progress?
+      hasFatalSnapshot completionDiagnostics
   let hints ← collectStaleDirectDepHintsForSession server started.session started.uri started.version
     directImports
   let staleDepsBlock := staleDirectDepsBlock started.changed hints
@@ -1939,10 +1935,10 @@ private def saveOleanCore
   withFailureProgress barrier.progress? <| liftFailureIO <| ensureRequestNotCancelled cancelRef?
   let saveReadiness ←
     withFailureProgress barrier.progress? <|
-      syncSaveReadinessOfBarrierResult started.uri started.version started.textHash barrierResult
+      syncSaveReadinessOfBarrierResult started.uri started.version started.documentHash barrierResult
   let currentDiagnostics := saveReadiness.currentDiagnostics
   let barrierOutcome ← withFailureProgress barrier.progress? <|
-    syncBarrierOutcome server started barrier.progress? barrier.diagnosticsSeen
+    syncBarrierOutcome server started barrier.progress? barrier.diagnosticsSeen barrierResult.hasFatalSnapshot
       barrier.diagnostics barrierResult.directImports currentDiagnostics
   let barrierProgress? := barrierOutcome.fileProgress?
   withFailureProgress barrierProgress? <|
@@ -1966,7 +1962,7 @@ private def saveOleanCore
     }
   let spec ← withFailureProgress barrierProgress? <| liftBrokerFailureIO <|
     mkLeanSaveSpec started.session.root path
-      { hash := started.textTraceHash, mtime := started.textMTime }
+      { hash := started.lakeTraceHash, mtime := started.textMTime }
       (some leanConfig.command) leanConfig.lakeHelper?
   let syncResult :=
     mkSyncFileResult spec.relPath started.version currentDiagnostics saveReadiness
@@ -1990,7 +1986,7 @@ private def saveOleanCore
   let params := toJson ({
     textDocument := ({ uri := started.uri : TextDocumentIdentifier })
     expectedVersion := started.version
-    expectedTextHash := started.textHash
+    expectedTextHash := started.documentHash
     oleanFile := spec.oleanPath.toString
     moduleArtifacts? :=
       match spec.oleanServerPath?, spec.oleanPrivatePath?, spec.irPath?, spec.irSigPath? with
@@ -2043,9 +2039,9 @@ private def saveOleanCore
     throw <| (responseFailureFor .internalError
       s!"save_olean saved version {saveResult.version}, expected document version {started.version}")
       |>.withOptionalFileProgress barrierProgress?
-  if saveResult.textHash != started.textHash then
+  if saveResult.textHash != started.documentHash then
     throw <| (responseFailureFor .internalError
-      s!"save_olean saved text hash {saveResult.textHash}, expected synced hash {started.textHash}")
+      s!"save_olean saved text hash {saveResult.textHash}, expected synced hash {started.documentHash}")
       |>.withOptionalFileProgress barrierProgress?
   withFailureProgress barrierProgress? <| liftBrokerFailureIO <| writeLeanSaveTrace spec
   pure {
@@ -2053,7 +2049,7 @@ private def saveOleanCore
     uri := started.uri
     version := started.version
     spec
-    result := leanSaveResult spec started.textTraceHash syncResult
+    result := leanSaveResult spec started.lakeTraceHash syncResult
     fileProgress? := barrierProgress?
   }
 
@@ -2102,10 +2098,10 @@ private def handleSyncFileOp
       |>.withOptionalFileProgress pending.progress?
   let saveReadiness ←
     withFailureProgress pending.progress? <|
-      syncSaveReadinessOfBarrierResult started.uri started.version started.textHash barrierResult
+      syncSaveReadinessOfBarrierResult started.uri started.version started.documentHash barrierResult
   let currentDiagnostics := saveReadiness.currentDiagnostics
   let barrierOutcome ← withFailureProgress pending.progress? <|
-    syncBarrierOutcome server started pending.progress? pending.diagnosticsSeen
+    syncBarrierOutcome server started pending.progress? pending.diagnosticsSeen barrierResult.hasFatalSnapshot
       pending.diagnostics barrierResult.directImports currentDiagnostics
   let fileProgress? := barrierOutcome.fileProgress?
   withFailureProgress fileProgress? <|
