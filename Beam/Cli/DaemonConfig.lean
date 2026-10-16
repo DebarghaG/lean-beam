@@ -22,88 +22,36 @@ structure LeanBackendConfig where
   bundleId : String
   deriving Repr
 
-/-- The complete temporary Rocq backend configuration in a wrapper-owned session. -/
-structure RocqBackendConfig where
-  command : String
-  deriving Repr
+namespace LeanBackendConfig
 
-/-- A nonempty set of complete backend configurations for one wrapper-owned workspace. -/
-inductive BackendSet where
-  /-- A Lean workspace may also expose the temporary Rocq backend. -/
-  | lean (lean : LeanBackendConfig) (rocq? : Option RocqBackendConfig)
-  /-- A Rocq-owned session uses only the temporary Rocq backend. -/
-  | rocq (rocq : RocqBackendConfig)
-  deriving Repr
+def toWorkspaceBinding (config : LeanBackendConfig) (workspaceId : WorkspaceId)
+    (root : System.FilePath) : Beam.Daemon.WorkspaceBinding := {
+  workspaceId
+  root := root.toString
+  bundleId := config.bundleId
+  leanCmd := config.command
+  plugin := config.plugin.toString
+  toolchain := config.toolchain
+}
 
-namespace BackendSet
+def daemonArgs (config : LeanBackendConfig) : Array String :=
+  #["--lean-cmd", config.command, "--lean-plugin", config.plugin.toString]
 
-private def rocqOnlyDescriptorBundleId : String :=
-  "default"
+private def hashFields (config : LeanBackendConfig) (daemonBin : System.FilePath) : List String :=
+  [config.command, config.plugin.toString, daemonBin.toString, config.bundleId]
 
-private def descriptorBundleId : BackendSet → String
-  | .lean leanConfig _ => leanConfig.bundleId
-  | .rocq _ => rocqOnlyDescriptorBundleId
-
-/-- Lower a complete internal backend set into the private session descriptor wire shape. -/
-def toWorkspaceBinding
-    (backends : BackendSet)
-    (workspaceId : WorkspaceId)
-    (root : System.FilePath) : Beam.Daemon.WorkspaceBinding :=
-  let common : Beam.Daemon.WorkspaceBinding := {
-    workspaceId
-    root := root.toString
-    bundleId := backends.descriptorBundleId
-  }
-  match backends with
-  | .lean leanConfig rocq? => {
-      common with
-      leanCmd? := some leanConfig.command
-      plugin? := some leanConfig.plugin.toString
-      rocqCmd? := rocq?.map (·.command)
-      toolchain? := some leanConfig.toolchain
-    }
-  | .rocq rocqConfig => {
-      common with
-      rocqCmd? := some rocqConfig.command
-    }
-
-/-- Command-line arguments that install this complete backend set in a Beam daemon. -/
-def daemonArgs : BackendSet → Array String
-  | .lean leanConfig rocq? =>
-      #["--lean-cmd", leanConfig.command, "--lean-plugin", leanConfig.plugin.toString] ++
-        match rocq? with
-        | some rocqConfig => #["--rocq-cmd", rocqConfig.command]
-        | none => #[]
-  | .rocq rocqConfig =>
-      #["--rocq-cmd", rocqConfig.command]
-
-private def hashFields
-    (backends : BackendSet)
-    (daemonBin : System.FilePath) : List String :=
-  match backends with
-  | .lean leanConfig rocq? =>
-      [
-        leanConfig.command,
-        leanConfig.plugin.toString,
-        rocq?.map (·.command) |>.getD "",
-        daemonBin.toString,
-        backends.descriptorBundleId
-      ]
-  | .rocq rocqConfig =>
-      ["", "", rocqConfig.command, daemonBin.toString, backends.descriptorBundleId]
-
-end BackendSet
+end LeanBackendConfig
 
 /-- Source configuration for one wrapper-owned daemon generation. -/
 structure DesiredConfig where
   root : System.FilePath
-  backends : BackendSet
+  lean : LeanBackendConfig
   daemonBin : System.FilePath
   deriving Repr
 
-/-- Hash the complete desired configuration using the established wrapper session field order. -/
+/-- Hash the project root and complete runtime configuration. -/
 def DesiredConfig.configHash (config : DesiredConfig) : String :=
-  let fields := config.root.toString :: config.backends.hashFields config.daemonBin
+  let fields := config.root.toString :: config.lean.hashFields config.daemonBin
   let hash := fields.foldl mixField 14695981039346656037
   s!"{hash.toNat}"
 

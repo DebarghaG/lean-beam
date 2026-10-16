@@ -24,13 +24,11 @@ private def mkDoc (version : Nat := 1) (moduleName? : Option String := none) : D
 private def checkTrackedModuleName : IO Unit := do
   let root := System.FilePath.mk "/workspace"
   require "lean module path"
-    (DocumentState.trackedModuleName? root (root / "Foo" / "Bar.lean") .lean == some "Foo.Bar")
-  require "non-lean backend has no module"
-    (DocumentState.trackedModuleName? root (root / "Foo" / "Bar.lean") .rocq == none)
+    (DocumentState.trackedModuleName? root (root / "Foo" / "Bar.lean") == some "Foo.Bar")
   require "non-lean file has no module"
-    (DocumentState.trackedModuleName? root (root / "Foo" / "Bar.v") .lean == none)
+    (DocumentState.trackedModuleName? root (root / "Foo" / "Bar.v") == none)
   require "outside root has no module"
-    (DocumentState.trackedModuleName? root (System.FilePath.mk "/other/Foo.lean") .lean == none)
+    (DocumentState.trackedModuleName? root (System.FilePath.mk "/other/Foo.lean") == none)
 
 private def checkRecordFileProgress : IO Unit := do
   let uri := "file:///workspace/Foo.lean"
@@ -159,9 +157,9 @@ private def checkLineEndingVersion : IO Unit := do
   let lf := "def value := 1\n"
   let crlf := "def value := 1\r\n"
   let opened := DocumentState.syncFileDecision {} uri
-    (DocumentState.FileSnapshot.ofText .lean lf default (moduleName? := some "Foo"))
+    (DocumentState.FileSnapshot.ofText lf default (moduleName? := some "Foo"))
   let changed := DocumentState.syncFileDecision opened.docs uri
-    (DocumentState.FileSnapshot.ofText .lean crlf default (moduleName? := some "Foo"))
+    (DocumentState.FileSnapshot.ofText crlf default (moduleName? := some "Foo"))
   require "line ending edits still advance the source version"
     (changed.action == .change && changed.version == 2)
   let some doc := changed.docs.get? uri

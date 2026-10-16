@@ -6,6 +6,16 @@ This project keeps a lightweight, reverse-chronological changelog. Dates use `YY
 
 0.2.0 beta development is open. Add user-facing changes here as they land.
 
+### Removed
+
+- Move Rocq goal probes, agent skill, and `coq-lsp` setup to the independent `rocq-beam` project.
+  Lean Beam no longer accepts Rocq broker requests, `serve rocq`, or `--rocq-skill`.
+- Remove the redundant backend selector from broker requests and continuation handles. CLI commands
+  `serve`, `doctor`, and `validated-toolchains` no longer accept a trailing `lean` argument. Lean goals reject
+  the former Rocq-only `text`, `compact`, and `ppFormat` options.
+- Require complete Lean configuration in CLI session descriptors and reject undeclared descriptor
+  and workspace-binding fields.
+
 ### Added
 
 - Validated Lean `v4.35.0` final support and made it the repository's default Lean toolchain

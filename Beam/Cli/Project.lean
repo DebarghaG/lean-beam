@@ -34,20 +34,15 @@ def beamHome : IO System.FilePath := do
 
 abbrev hasLeanProject := Beam.Project.hasLeanProject
 
-abbrev hasRocqProject := Beam.Project.hasRocqProject
-
 def requireLeanProjectRoot (root : System.FilePath) : IO System.FilePath := do
   match ← Beam.Lean.Workspace.resolveCliRoot root.toString with
   | .ok root => pure root
   | .error err => throw <| IO.userError err.message
 
-partial def findRootUpwards (start : System.FilePath) (backend : Backend) : IO (Option System.FilePath) := do
+partial def findRootUpwards (start : System.FilePath) : IO (Option System.FilePath) := do
   let dir ← Beam.resolveExistingPath start
   let rec loop (dir : System.FilePath) : IO (Option System.FilePath) := do
-    let found ←
-      match backend with
-      | .lean => hasLeanProject dir
-      | .rocq => hasRocqProject dir
+    let found ← hasLeanProject dir
     if found then
       pure (some dir)
     else if dir == System.FilePath.mk "/" then
@@ -56,37 +51,18 @@ partial def findRootUpwards (start : System.FilePath) (backend : Backend) : IO (
       loop (dir.parent.getD dir)
   loop dir
 
-def projectRoot (opts : CliOptions) (backend : Backend) : IO System.FilePath := do
+def projectRoot (opts : CliOptions) : IO System.FilePath := do
   match opts.explicitRoot? with
-  | some root =>
-      match backend with
-      | .lean => requireLeanProjectRoot root
-      | .rocq => pure root
+  | some root => requireLeanProjectRoot root
   | none =>
-      match ← findRootUpwards (System.FilePath.mk ".") backend with
-      | some root =>
-          match backend with
-          | .lean => requireLeanProjectRoot root
-          | .rocq => pure root
-      | none =>
-          let backendName := match backend with | .lean => "lean" | .rocq => "rocq"
-          throw <| IO.userError s!"could not infer {backendName} project root; use --root PATH"
+      match ← findRootUpwards (System.FilePath.mk ".") with
+      | some root => requireLeanProjectRoot root
+      | none => throw <| IO.userError "could not infer lean project root; use --root PATH"
 
 def inferProjectRootAny (start : System.FilePath) : IO System.FilePath := do
-  let leanRoot? ← findRootUpwards start .lean
-  let rocqRoot? ← findRootUpwards start .rocq
-  match leanRoot?, rocqRoot? with
-  | none, none =>
-      throw <| IO.userError "could not infer project root; use --root PATH"
-  | some root, none | none, some root =>
-      pure root
-  | some leanRoot, some rocqRoot =>
-      if ← Beam.sameFilePath leanRoot rocqRoot then
-        pure leanRoot
-      else
-        throw <| IO.userError <|
-          "project root is ambiguous; found both " ++
-          s!"Lean root {leanRoot} and Rocq root {rocqRoot}; use --root PATH"
+  match ← findRootUpwards start with
+  | some root => pure root
+  | none => throw <| IO.userError "could not infer project root; use --root PATH"
 
 def projectRootAny (opts : CliOptions) : IO System.FilePath := do
   match opts.explicitRoot? with
@@ -107,25 +83,5 @@ def leanToolchain (root : System.FilePath) : IO String := do
 
 def leanBin (root : System.FilePath) : IO String :=
   Beam.readCmdTrim "elan" #["which", "lean"] (some root)
-
-def rocqCandidates (root : System.FilePath) : List System.FilePath :=
-  [root / "_opam" / "bin" / "coq-lsp", root / "_opam" / "_opam" / "bin" / "coq-lsp"]
-
-def maybeRocqCmd (root : System.FilePath) : IO (Option String) := do
-  for candidate in rocqCandidates root do
-    if ← candidate.pathExists then
-      return some candidate.toString
-  match ← IO.getEnv "BEAM_ROCQ_CMD" with
-  | some cmd => pure (some cmd)
-  | none =>
-      if ← Beam.commandAvailable "coq-lsp" then
-        pure (some "coq-lsp")
-      else
-        pure none
-
-def rocqCmd (root : System.FilePath) : IO String := do
-  match ← maybeRocqCmd root with
-  | some cmd => pure cmd
-  | none => throw <| IO.userError s!"could not find coq-lsp for {root}"
 
 end Beam.Cli

@@ -15,21 +15,15 @@ structure LeanBackendConfig where
   lakeHelper? : Option System.FilePath := none
   deriving BEq, Inhabited, Repr
 
-/-- Complete process configuration for one Rocq backend. -/
-structure RocqBackendConfig where
-  command : String
-  deriving BEq, Inhabited, Repr
-
 /--
 Runtime configuration for one broker workspace.
 
-The optional backends permit an intentionally backend-less standalone bootstrap workspace. Once a
-backend is present, its required process configuration is complete by construction.
+The optional Lean configuration permits an intentionally backend-less standalone bootstrap
+workspace. Once configured, its required process configuration is complete by construction.
 -/
 structure BrokerConfig where
   root : System.FilePath
   lean? : Option LeanBackendConfig := none
-  rocq? : Option RocqBackendConfig := none
   deriving BEq, Inhabited, Repr
 
 namespace BrokerConfig
@@ -38,8 +32,7 @@ namespace BrokerConfig
 def ofOptions
     (root : System.FilePath)
     (leanCommand? : Option String)
-    (leanPlugin? : Option System.FilePath)
-    (rocqCommand? : Option String := none) : Except String BrokerConfig := do
+    (leanPlugin? : Option System.FilePath) : Except String BrokerConfig := do
   let lean? ←
     match leanCommand?, leanPlugin? with
     | none, none => pure none
@@ -48,7 +41,6 @@ def ofOptions
   pure {
     root
     lean?
-    rocq? := rocqCommand?.map fun command => { command }
   }
 
 end BrokerConfig

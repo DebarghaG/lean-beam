@@ -133,13 +133,6 @@ private def printLeanDoctorInfo (home root : System.FilePath) : IO Unit := do
   IO.println s!"bundle daemon: {bundleInfo.daemon}"
   IO.println s!"plugin: {bundleInfo.plugin}"
 
-private def printRocqDoctorInfo (home root : System.FilePath) : IO Unit := do
-  let daemon ← defaultDaemonPath home
-  let daemonReady := ← daemon.pathExists
-  IO.println s!"coq-lsp: {(← maybeRocqCmd root).getD ""}"
-  IO.println s!"daemon ready: {boolText daemonReady}"
-  IO.println s!"daemon binary: {daemon}"
-
 def daemonFailureIncidentDoctorLines
     (root : System.FilePath)
     (explicitControlDir? : Option System.FilePath := none) : IO (List String) := do
@@ -157,13 +150,11 @@ private def printDaemonFailureIncidentDoctorInfo
   for line in ← daemonFailureIncidentDoctorLines root explicitControlDir? do
     IO.println line
 
-def doctor (home : System.FilePath) (opts : CliOptions) (backend : Backend) : IO Unit := do
-  let root ← projectRoot opts backend
+def doctor (home : System.FilePath) (opts : CliOptions) : IO Unit := do
+  let root ← projectRoot opts
   IO.println s!"beam home: {home}"
   IO.println s!"project root: {root}"
-  match backend with
-  | .lean => printLeanDoctorInfo home root
-  | .rocq => printRocqDoctorInfo home root
+  printLeanDoctorInfo home root
   let registry ← Beam.Daemon.registryPathFor root opts.explicitControlDir?
   IO.println s!"registry: {registry}"
   match ← observeProjectRegistry root opts.explicitControlDir? with
@@ -188,14 +179,10 @@ def doctor (home : System.FilePath) (opts : CliOptions) (backend : Backend) : IO
       IO.println s!"daemon safety error: {reason.message}"
   printDaemonFailureIncidentDoctorInfo root opts.explicitControlDir?
 
-def printValidatedToolchains (home : System.FilePath) (backendName : String) : IO Unit := do
-  match backendName with
-  | "lean" =>
-      let (_, toolchains) ← validatedLeanToolchains home
-      for toolchain in toolchains do
-        IO.println toolchain
-  | _ =>
-      throw <| IO.userError "usage: lean-beam validated-toolchains"
+def printValidatedToolchains (home : System.FilePath) : IO Unit := do
+  let (_, toolchains) ← validatedLeanToolchains home
+  for toolchain in toolchains do
+    IO.println toolchain
 
 def printCompatibleReleaseLines (home : System.FilePath) : IO Unit := do
   let (_, lines) ← compatibleLeanReleaseLines home
@@ -226,10 +213,9 @@ def printInstallManifestWithSourceCommit
   printJsonLine <| toJson { manifest with sourceCommit := sourceCommitArg? sourceCommitArg }
 
 def printMcpConfig (home : System.FilePath) (opts : CliOptions) : IO Unit := do
-  let root ← projectRoot opts .lean
-  let desired ← desiredConfig home root .lean
-  let .lean leanConfig _ := desired.backends
-    | throw <| IO.userError s!"could not resolve Lean backend for MCP project root {root}"
+  let root ← projectRoot opts
+  let desired ← desiredConfig home root
+  let leanConfig := desired.lean
   printJsonLine <| Json.mkObj [
     ("root", toJson root.toString),
     ("lean_cmd", toJson leanConfig.command),

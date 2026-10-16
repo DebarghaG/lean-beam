@@ -1066,11 +1066,11 @@ if (
   cd "$source_checkout"
   bash scripts/install-beam.sh --dont-ask --rocq-skill > /dev/null 2>"$rocq_no_target_err"
 ); then
-  echo "expected --rocq-skill without an agent target to fail" >&2
+  echo "expected the removed --rocq-skill option to fail" >&2
   remove_tmp_file "$rocq_no_target_err"
   exit 1
 fi
-assert_contains "$rocq_no_target_err" "rocq-skill requires"
+assert_contains "$rocq_no_target_err" "unknown option: --rocq-skill"
 remove_tmp_file "$rocq_no_target_err"
 assert_not_exists "$CODEX_HOME"
 assert_not_exists "$CLAUDE_HOME"
@@ -1087,26 +1087,6 @@ for skills_home in "$CODEX_HOME/skills" "$CLAUDE_HOME/skills" "$PI_CODING_AGENT_
 done
 assert_version_count "$BEAM_INSTALL_ROOT/versions" 1
 BEAM_INSTALL_LAYOUT_JSON="$install_layout_json" assert_manifest_metadata "$installed_runtime_root/manifest.json" "$installed_payload_id" "$expected_source_commit" "$toolchain"
-
-run_step "install optional Rocq skills" run_install_from_source --toolchain "$toolchain" --all-skills --rocq-skill
-
-for skills_home in "$CODEX_HOME/skills" "$CLAUDE_HOME/skills" "$PI_CODING_AGENT_DIR/skills" "$OPENCODE_CONFIG_DIR/skills" "$VIBE_HOME/skills"; do
-  assert_file "$skills_home/lean-beam/SKILL.md"
-  assert_file "$skills_home/lean-beam/.lean-beam-skill"
-  assert_file "$skills_home/rocq-beam/SKILL.md"
-  assert_file "$skills_home/rocq-beam/.lean-beam-skill"
-done
-assert_version_count "$BEAM_INSTALL_ROOT/versions" 1
-BEAM_INSTALL_LAYOUT_JSON="$install_layout_json" assert_manifest_metadata "$installed_runtime_root/manifest.json" "$installed_payload_id" "$expected_source_commit" "$toolchain"
-
-codex_only_home="$tmp_root/codex-only-codex"
-claude_only_home="$tmp_root/codex-only-claude"
-run_step "install optional Rocq skill for Codex only" \
-  env CODEX_HOME="$codex_only_home" CLAUDE_HOME="$claude_only_home" \
-  bash "$source_checkout/scripts/install-beam.sh" --dont-ask --toolchain "$toolchain" --codex --rocq-skill
-assert_file "$codex_only_home/skills/lean-beam/SKILL.md"
-assert_file "$codex_only_home/skills/rocq-beam/SKILL.md"
-assert_not_exists "$claude_only_home"
 
 mcp_stub_bin="$tmp_root/mcp-stubs"
 mcp_stub_log="$tmp_root/mcp-stubs.log"
@@ -1539,17 +1519,17 @@ printf 'leanprover/lean4:v4.32.0-rc1\n' > "$unsupported_project_root/lean-toolch
 
 unsupported_doctor_out="$("$installed_lean_beam" --root "$unsupported_project_root" doctor)"
 if ! printf '%s\n' "$unsupported_doctor_out" | grep -q 'project toolchain admission: unsupported'; then
-  echo "expected doctor lean to report unsupported toolchains explicitly" >&2
+  echo "expected doctor to report unsupported toolchains explicitly" >&2
   printf '%s\n' "$unsupported_doctor_out" >&2
   exit 1
 fi
 if ! printf '%s\n' "$unsupported_doctor_out" | grep -q 'project toolchain accepted: false'; then
-  echo "expected doctor lean to reject unsupported toolchains explicitly" >&2
+  echo "expected doctor to reject unsupported toolchains explicitly" >&2
   printf '%s\n' "$unsupported_doctor_out" >&2
   exit 1
 fi
 if ! printf '%s\n' "$unsupported_doctor_out" | grep -q 'bundle toolchain fingerprint: (not resolved for rejected toolchain)'; then
-  echo "expected doctor lean not to fingerprint unsupported toolchains" >&2
+  echo "expected doctor not to fingerprint unsupported toolchains" >&2
   printf '%s\n' "$unsupported_doctor_out" >&2
   exit 1
 fi

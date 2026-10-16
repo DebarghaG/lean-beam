@@ -101,7 +101,6 @@ private def fakeTrackedSession (root transcript : System.FilePath) : IO Beam.Bro
   let session : Beam.Broker.Session := {
     workspaceId := fixtureWorkspaceId
     workspaceGeneration := 1
-    backend := .lean
     root
     epoch := 1
     sessionToken := "fake-tracked-session"
@@ -132,12 +131,11 @@ private def fakeSessionWithSyncedDoc
   let text ← IO.FS.readFile path
   let textMTime ← Lake.getFileMTime path
   let uri := Beam.Broker.sessionUri path
-  let snapshot := Beam.Broker.DocumentState.FileSnapshot.ofText .lean text textMTime (readSeq := 1)
+  let snapshot := Beam.Broker.DocumentState.FileSnapshot.ofText text textMTime (readSeq := 1)
   let docs := ({} : Std.TreeMap String Beam.Broker.DocState).insert uri (snapshot.toDocState version)
   let session : Beam.Broker.Session := {
     workspaceId := fixtureWorkspaceId
     workspaceGeneration := 1
-    backend := .lean
     root
     epoch := 1
     sessionToken := "fake-run-at-session"

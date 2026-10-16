@@ -72,7 +72,7 @@ private def ensureTestControlDir (root : System.FilePath) : IO System.FilePath :
   Beam.ensurePrivateDir "test Beam session directory" control
   pure control
 
-private def checkBackendConfigLowering : IO Unit := do
+private def checkLeanConfigLowering : IO Unit := do
   let root := System.FilePath.mk "/tmp/beam-backend-config-project"
   let daemonBin := System.FilePath.mk "/bundle/bin/beam-daemon"
   let lean : Beam.Cli.LeanBackendConfig := {
@@ -81,66 +81,28 @@ private def checkBackendConfigLowering : IO Unit := do
     toolchain := "leanprover/lean4:v4.33.0"
     bundleId := "lean-bundle"
   }
-  let rocq : Beam.Cli.RocqBackendConfig := {
-    command := "/toolchain/bin/coq-lsp"
-  }
-  let leanOnlyBackends := Beam.Cli.BackendSet.lean lean none
   require "Lean-only daemon arguments should contain exactly one complete Lean backend"
-    (leanOnlyBackends.daemonArgs ==
+    (lean.daemonArgs ==
       #["--lean-cmd", lean.command, "--lean-plugin", lean.plugin.toString])
   let leanOnly :=
-    leanOnlyBackends.toWorkspaceBinding
+    lean.toWorkspaceBinding
       Beam.Cli.projectDaemonWorkspaceId root
   require "Lean-only lowering should retain the complete Lean command"
-    (leanOnly.leanCmd? == some lean.command)
+    (leanOnly.leanCmd == lean.command)
   require "Lean-only lowering should retain the complete Lean plugin"
-    (leanOnly.plugin? == some lean.plugin.toString)
+    (leanOnly.plugin == lean.plugin.toString)
   require "Lean-only lowering should retain the complete Lean toolchain"
-    (leanOnly.toolchain? == some lean.toolchain)
+    (leanOnly.toolchain == lean.toolchain)
   require "Lean-only lowering should retain its bundle identity"
     (leanOnly.bundleId == lean.bundleId)
-  require "Lean-only lowering should not invent a Rocq backend" leanOnly.rocqCmd?.isNone
   let leanOnlyDesired : Beam.Cli.DesiredConfig := {
-    root, backends := leanOnlyBackends, daemonBin
+    root, lean, daemonBin
   }
-  require "Lean-only configuration hash should remain stable"
-    (leanOnlyDesired.configHash == "17120276106979378397")
-
-  let mixedBackends := Beam.Cli.BackendSet.lean lean (some rocq)
-  require "mixed daemon arguments should contain both complete backends"
-    (mixedBackends.daemonArgs == #[
-      "--lean-cmd", lean.command,
-      "--lean-plugin", lean.plugin.toString,
-      "--rocq-cmd", rocq.command
-    ])
-  let mixed :=
-    mixedBackends.toWorkspaceBinding Beam.Cli.projectDaemonWorkspaceId root
-  require "mixed lowering should retain the Rocq command"
-    (mixed.rocqCmd? == some rocq.command)
-  require "mixed lowering should retain the complete Lean configuration"
-    (mixed.leanCmd? == leanOnly.leanCmd? && mixed.plugin? == leanOnly.plugin? &&
-      mixed.toolchain? == leanOnly.toolchain? && mixed.bundleId == leanOnly.bundleId)
-  let desired : Beam.Cli.DesiredConfig := { root, backends := mixedBackends, daemonBin }
-  require "typed backend configuration should preserve the established session hash"
-    (desired.configHash == "14494604925744848067")
-
-  let rocqOnlyBackends := Beam.Cli.BackendSet.rocq rocq
-  require "Rocq-only daemon arguments should contain exactly one complete Rocq backend"
-    (rocqOnlyBackends.daemonArgs == #["--rocq-cmd", rocq.command])
-  let rocqOnly :=
-    rocqOnlyBackends.toWorkspaceBinding
-      Beam.Cli.projectDaemonWorkspaceId root
-  require "Rocq-only lowering should retain its command"
-    (rocqOnly.rocqCmd? == some rocq.command)
-  require "Rocq-only lowering should not invent partial Lean configuration"
-    (rocqOnly.leanCmd?.isNone && rocqOnly.plugin?.isNone && rocqOnly.toolchain?.isNone)
-  require "Rocq-only lowering should use the default daemon bundle identity"
-    (rocqOnly.bundleId == "default")
-  let rocqOnlyDesired : Beam.Cli.DesiredConfig := {
-    root, backends := rocqOnlyBackends, daemonBin
+  let differentPlugin : Beam.Cli.DesiredConfig := {
+    leanOnlyDesired with lean := { lean with plugin := "/other/plugin.so" }
   }
-  require "Rocq-only configuration hash should remain stable"
-    (rocqOnlyDesired.configHash == "16939410485235298874")
+  require "configuration hashes should distinguish backend plugins"
+    (leanOnlyDesired.configHash != differentPlugin.configHash)
 
 private def requireJsonNat (label field : String) (expected : Nat) (json : Json) : IO Unit := do
   let actual ← IO.ofExcept <| json.getObjValAs? Nat field
@@ -505,7 +467,6 @@ private def requireRequestJson
 
 private def sampleBrokerHandle : Beam.Broker.Handle := {
   workspaceId := Beam.Cli.projectDaemonWorkspaceId
-  backend := .lean
   epoch := 3
   session := "session"
   raw := Json.mkObj [("value", toJson "raw-handle")]
@@ -646,7 +607,7 @@ private def checkCliRootParsing : IO Unit := do
   expectIoErrorContains
     "missing explicit CLI root should use the workspace error boundary"
     "workspace root does not resolve"
-    (Beam.Cli.parseCliOptions {} ["--root", missingRoot.toString, "serve", "lean"])
+    (Beam.Cli.parseCliOptions {} ["--root", missingRoot.toString, "serve"])
   expectIoErrorContains
     "relative session directory should be rejected"
     "--session-dir requires an absolute path"
@@ -683,7 +644,7 @@ private def checkCliRootParsing : IO Unit := do
     if ← root.pathExists then
       IO.FS.removeDirAll root
 
-private def checkProjectRootAmbiguity : IO Unit := do
+private def checkProjectRootSelection : IO Unit := do
   let root := System.FilePath.mk s!"/tmp/beam-cli-root-selection-{← IO.monoNanosNow}"
   let leanRoot := root / "lean"
   let rocqRoot := leanRoot / "rocq"
@@ -692,17 +653,16 @@ private def checkProjectRootAmbiguity : IO Unit := do
     IO.FS.createDirAll nested
     IO.FS.writeFile (leanRoot / "lean-toolchain") "leanprover/lean4:stable\n"
     IO.FS.writeFile (rocqRoot / "_RocqProject") "\n"
-    expectIoErrorContains
-      "backend-neutral root inference should reject mixed-root ambiguity"
-      "project root is ambiguous"
-      (Beam.Cli.inferProjectRootAny nested)
+    let expectedLeanRoot ← Beam.resolveExistingPath leanRoot
+    require "Rocq project markers should not affect Lean root inference"
+      ((← Beam.Cli.inferProjectRootAny nested) == expectedLeanRoot)
     let explicitLean ← Beam.resolveExistingPath leanRoot
-    require "an explicit root should resolve mixed-root ambiguity"
+    require "an explicit root should select the requested Lean workspace"
       ((← Beam.Cli.projectRootAny { explicitRoot? := some explicitLean }) == explicitLean)
 
     IO.FS.writeFile (rocqRoot / "lean-toolchain") "leanprover/lean4:stable\n"
     let sharedRoot ← Beam.resolveExistingPath rocqRoot
-    require "one directory containing both project markers should be one root candidate"
+    require "root inference should select the nearest Lean project"
       ((← Beam.Cli.inferProjectRootAny rocqRoot) == sharedRoot)
   finally
     if ← root.pathExists then
@@ -854,9 +814,9 @@ private def checkDaemonFailureContext : IO Unit := do
       workspace := {
         workspaceId := Beam.Cli.projectDaemonWorkspaceId
         root := root.toString
-        leanCmd? := some "lean --server"
-        plugin? := some "/tmp/beam-plugin"
-        toolchain? := some "leanprover/lean4:test"
+        leanCmd := "lean --server"
+        plugin := "/tmp/beam-plugin"
+        toolchain := "leanprover/lean4:test"
         bundleId := "bundle-test"
       }
       configHash := "config-test"
@@ -1001,9 +961,9 @@ private def writeTestRegistryEntry
     workspace := {
       workspaceId := Beam.Cli.projectDaemonWorkspaceId
       root := root.toString
-      leanCmd? := some "lean --server"
-      plugin? := some "/tmp/beam-plugin"
-      toolchain? := some "leanprover/lean4:test"
+      leanCmd := "lean --server"
+      plugin := "/tmp/beam-plugin"
+      toolchain := "leanprover/lean4:test"
       bundleId := "bundle-test"
     }
     configHash := "config-test"
@@ -1078,30 +1038,28 @@ private def checkTypedRegistryReads : IO Unit := do
       | .invalid (.malformed detail) =>
           require label (detail.contains needle)
       | state => throw <| IO.userError s!"{label}: descriptor was classified as {state.status}"
+      require s!"{label}: malformed descriptor should be preserved"
+        ((← IO.FS.readFile registryPath) == json.compress)
 
     expectMalformedRegistry "missing daemon binary should fail the typed boundary"
       "invalid registry schema" (eraseObjectField validJson "daemonBin")
 
     let workspaceJson ← IO.ofExcept <| validJson.getObjVal? "workspace"
+    for field in #["rocqCmd", "unexpected"] do
+      expectMalformedRegistry s!"workspace descriptor rejects undeclared field {field}"
+        field <| validJson.setObjVal! "workspace" <|
+          workspaceJson.setObjVal! field (toJson "coq-lsp")
+    expectMalformedRegistry "session descriptor rejects undeclared fields"
+      "unexpected" (validJson.setObjVal! "unexpected" (toJson true))
     expectMalformedRegistry "missing bundle id should fail the typed boundary"
       "invalid registry schema" <|
         validJson.setObjVal! "workspace" (eraseObjectField workspaceJson "bundleId")
-    expectMalformedRegistry "partial Lean backend should fail descriptor validation"
-      "must configure the Lean command, plugin, and toolchain together" <|
-        validJson.setObjVal! "workspace" (eraseObjectField workspaceJson "plugin")
-    expectMalformedRegistry "Lean backend without a toolchain should fail descriptor validation"
-      "must configure the Lean command, plugin, and toolchain together" <|
-        validJson.setObjVal! "workspace" (eraseObjectField workspaceJson "toolchain")
-    expectMalformedRegistry "backend-free workspace should fail descriptor validation"
-      "must configure at least one backend" <|
-        validJson.setObjVal! "workspace" <|
-          eraseObjectField
-            (eraseObjectField (eraseObjectField workspaceJson "leanCmd") "plugin") "toolchain"
-    expectMalformedRegistry "Lean toolchain without Lean backend should fail descriptor validation"
-      "cannot name a Lean toolchain without a Lean backend" <|
-        validJson.setObjVal! "workspace" <|
-          (eraseObjectField (eraseObjectField workspaceJson "leanCmd") "plugin").setObjVal!
-            "rocqCmd" (toJson "coq-lsp")
+    for field in #["leanCmd", "plugin", "toolchain"] do
+      expectMalformedRegistry s!"workspace descriptor requires {field}"
+        field <| validJson.setObjVal! "workspace" (eraseObjectField workspaceJson field)
+      expectMalformedRegistry s!"workspace descriptor rejects null {field}"
+        "invalid registry schema" <| validJson.setObjVal! "workspace" <|
+          workspaceJson.setObjVal! field Json.null
     expectMalformedRegistry "empty bundle id should fail descriptor validation"
       "bundle id must not be empty" <|
         validJson.setObjVal! "workspace" <| workspaceJson.setObjVal! "bundleId" (toJson "")
@@ -1113,9 +1071,6 @@ private def checkTypedRegistryReads : IO Unit := do
     expectMalformedRegistry "empty Lean plugin should fail descriptor validation"
       "Lean plugin must not be empty" <|
         validJson.setObjVal! "workspace" <| workspaceJson.setObjVal! "plugin" (toJson "")
-    expectMalformedRegistry "empty Rocq command should fail descriptor validation"
-      "Rocq command must not be empty" <|
-        validJson.setObjVal! "workspace" <| workspaceJson.setObjVal! "rocqCmd" (toJson "")
     expectMalformedRegistry "empty Lean toolchain should fail descriptor validation"
       "Lean toolchain must not be empty" <|
         validJson.setObjVal! "workspace" <| workspaceJson.setObjVal! "toolchain" (toJson "")
@@ -1731,13 +1686,13 @@ private def checkRuntimeBundleMetadataAcceptance : IO Unit := do
       pure ()
 
 def main : IO Unit := do
-  checkBackendConfigLowering
+  checkLeanConfigLowering
   checkProjectDaemonRequestSealing
   checkClientResponsePresentation
   checkCliRecoveryHints
   checkSyncWaitSpecs
   checkCliRootParsing
-  checkProjectRootAmbiguity
+  checkProjectRootSelection
   checkLeanOperationRequests
   checkDiagnosticScopeArgs
   checkDaemonFailureContext
