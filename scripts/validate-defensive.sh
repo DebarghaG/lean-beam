@@ -23,9 +23,10 @@ Usage:
   bash scripts/validate-defensive.sh [--keep-root] [--print-root] -- <command...>
 
 Default validation command sequence:
-  1. lake build beam-cli
-  2. bash tests/test-beam-install.sh
-  3. bash tests/test-beam-slow.sh
+  1. bash scripts/lint-shell.sh
+  2. lake build beam-cli
+  3. bash tests/test-beam-install.sh
+  4. bash tests/test-beam-slow.sh
 
 This script is a maintainer safety wrapper. It clones the current checkout into /tmp,
 overlays the working tree state, sets fake HOME/CODEX_HOME/CLAUDE_HOME/TMPDIR, and
@@ -388,6 +389,7 @@ fi
 if [ "${#custom_command[@]}" -gt 0 ]; then
   run_step "running custom command" ${custom_command[@]+"${custom_command[@]}"}
 else
+  run_step "bash scripts/lint-shell.sh" bash scripts/lint-shell.sh
   run_step "lake build beam-cli" lake build beam-cli
   run_step "bash tests/test-beam-install.sh" bash tests/test-beam-install.sh
   run_step "bash tests/test-beam-slow.sh" bash tests/test-beam-slow.sh

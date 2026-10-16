@@ -83,7 +83,8 @@ Run the LSP surface when the change touches request semantics, proof-vs-command 
 
 Default Beam entrypoints:
 
-- [tests/test-beam-fast.sh](../tests/test-beam-fast.sh): fast broker stream, barrier, request-contract, MCP projection, MCP smoke, and toolchain CI-matrix guard coverage
+- [tests/test-beam-fast.sh](../tests/test-beam-fast.sh): fast broker stream, barrier, request-contract,
+  MCP projection, HTTP bridge, self-check, and toolchain CI-matrix guard coverage
 - [tests/test-beam-slow.sh](../tests/test-beam-slow.sh): wrapper, MCP stdio stress and
   multi-toolchain workspace coverage, sandbox-wrapper, and save-replay coverage
 - [tests/test-beam-install.sh](../tests/test-beam-install.sh): installer and installed-runtime layout
@@ -299,9 +300,9 @@ PYTHONDONTWRITEBYTECODE=1 python3 tests/test-mcp-stdio.py \
 
 Set `--server-trace` to add MCP/broker trace lines to the timeout dump, and set
 `LEAN_BEAM_BROKER_WAIT_DIAGNOSTICS_WATCHDOG_MS=10000` to emit an opt-in broker trace if a
-`waitForDiagnostics` barrier is still pending after that many milliseconds. The regular CI Beam
-suites run the stdio smoke with `BEAM_MCP_STDIO_TIMEOUT` defaulting to 60 seconds, enable
-`BEAM_MCP_SERVER_TRACE=1` for the stdio harness by default, and set the diagnostics-barrier watchdog
+`waitForDiagnostics` barrier is still pending after that many milliseconds. The slow Beam suite
+runs the stdio stress harness with `BEAM_MCP_STDIO_TIMEOUT` defaulting to 60 seconds, enables
+`BEAM_MCP_SERVER_TRACE=1` for the stdio harness by default, and sets the diagnostics-barrier watchdog
 to `BEAM_MCP_STDIO_WAIT_DIAGNOSTICS_WATCHDOG_MS=10000`. Set `BEAM_MCP_STDIO_SERVER_TRACE=0` only
 when intentionally checking the quiet stderr path. The fast suite's installed-wrapper self-check uses
 `BEAM_MCP_SELF_CHECK_TIMEOUT_MS`, defaulting to 120 seconds, because first-time bundle setup may
@@ -323,15 +324,57 @@ The maintainer surface covers local workflow helpers:
 - [tests/test-maintainer.sh](../tests/test-maintainer.sh)
 - [tests/test-codex-harness.sh](../tests/test-codex-harness.sh)
 - [tests/test-validate-defensive.sh](../tests/test-validate-defensive.sh)
+- [tests/test-extended-ci.py](../tests/test-extended-ci.py): offline destination, revision, and CLI
+  failure checks for the fork-CI helper; also included in the fast suite
 
 The aggregate maintainer runner skips [tests/test-codex-harness.sh](../tests/test-codex-harness.sh) when the current checkout has tracked edits, because that harness regression intentionally verifies that new task worktrees start from a clean primary checkout.
 
-Run these when the change touches [scripts/codex-harness.sh](../scripts/codex-harness.sh), [scripts/codex-session-start.sh](../scripts/codex-session-start.sh), or [scripts/validate-defensive.sh](../scripts/validate-defensive.sh).
+Run these when the change touches [scripts/codex-harness.sh](../scripts/codex-harness.sh),
+[scripts/codex-session-start.sh](../scripts/codex-session-start.sh),
+[scripts/validate-defensive.sh](../scripts/validate-defensive.sh), or
+[scripts/extended-ci.py](../scripts/extended-ci.py).
 
 ## CI Map
 
+The GitHub Actions repository variable `BEAM_FULL_MACOS_CI` selects the macOS layout for pull
+requests, `main` pushes, and manual runs:
+
+- Unset or `false`: one combined `macos-platform` job, alongside the parallel Linux jobs.
+- `true`: the full Linux and macOS job matrices; the combined macOS job is skipped.
+
+Use the default combined mode in `leanprover/lean-beam`. Enable full mode in forks where the full
+macOS matrix is desired. Repository names and actors do not select the policy.
+
+The combined `macos-platform` job covers every test family.
+It runs shell lint, fast broker tests, LSP tests, MCP conformance and SDK tests, the slow suite,
+pinned-toolchain qualification, installer tests, and Rocq tests as separate steps in one checkout.
+The job shares Lean setup and incremental build outputs; each suite keeps its own temporary
+projects and homes. Independent test steps continue after another test fails, while a failed step
+still fails the job. The job has a 120-minute timeout.
+
+Each layout runs shell lint once per operating system, separately from the slow suite. The slow
+suite owns the full MCP stdio harness, including four iterations and three restart cycles; the fast
+suite retains protocol, projection, HTTP bridge, and self-check coverage. `test-lsp.sh` builds its own prerequisites, so the
+workflow does not run a separate build before it. The local aggregate and default defensive
+validation commands also run shell lint once before their product suites.
+
+Linux retains the separate parallel jobs and the exact toolchain compatibility matrix in both
+modes. The combined macOS job runs toolchain qualification once at the repository-pinned Lean
+version. Full mode runs the complete per-version macOS compatibility matrix.
+Installer tests still prebuild every toolchain in `validated-lean-toolchains`.
+
+The variable belongs to the repository running the workflow. A fork-originated PR running in
+`leanprover/lean-beam` therefore uses the upstream repository's setting. To enable full mode in a
+fork and request a run for a branch, replace `OWNER/REPO` with that fork's repository:
+
+```bash
+gh variable set BEAM_FULL_MACOS_CI --repo OWNER/REPO --body true
+gh workflow run ci.yml --repo OWNER/REPO --ref BRANCH
+```
+
 The current GitHub Actions workflow maps to the testing surfaces like this:
 
+- `macos-platform`: the combined macOS job described above
 - `lsp`: [tests/test-lsp.sh](../tests/test-lsp.sh)
 - `beam-fast`: [tests/test-beam-fast.sh](../tests/test-beam-fast.sh)
 - `mcp-conformance`: [tests/test-mcp-conformance.sh](../tests/test-mcp-conformance.sh)
@@ -345,9 +388,53 @@ The current GitHub Actions workflow maps to the testing surfaces like this:
 - `beam-rocq`: [tests/test-beam-rocq.sh](../tests/test-beam-rocq.sh)
 - `shell-lint`: [scripts/lint-shell.sh](../scripts/lint-shell.sh)
 
+## Extended Fork CI
+
+For macOS-sensitive changes that need the complete per-version and per-suite matrix, maintainers
+and Codex can request CI on the dedicated [test fork](https://github.com/ejgallego/lean-beam-ci-macos):
+
+```bash
+# Run from a clean, committed task worktree. Requires authenticated gh and SSH push access.
+python3 scripts/extended-ci.py --wait
+```
+
+[scripts/extended-ci.py](../scripts/extended-ci.py) verifies the fork's exact repository name,
+upstream relationship, active `ci.yml` workflow, and `BEAM_FULL_MACOS_CI=true` setting. It pushes
+`HEAD` to `extended-ci/<full-commit-sha>`, dispatches CI there, and prints the commit and run URL.
+It preserves local remotes and the fork's default branch. Existing runs for the same revision are
+reused; failed runs must be rerun explicitly through GitHub. Without `--wait`, the command returns
+after finding the run. With `--wait`, it exits unsuccessfully if CI fails.
+
+Use `--repo OWNER/REPO` for another fork configured as above. That fork must already have an
+enabled `ci.yml` supporting `workflow_dispatch` on its default branch. Redirects are rejected:
+`ejgallego/lean-beam` redirects to upstream and must not be used as a testing fork.
+
+For a fork that already has the workflow on its default branch, the one-time configuration is:
+
+```bash
+gh variable set BEAM_FULL_MACOS_CI --repo OWNER/REPO --body true
+gh workflow enable ci.yml --repo OWNER/REPO
+```
+
+If GitHub disables workflows on a newly created fork, enable them in that fork's Actions tab first,
+as described in [GitHub's fork workflow guidance](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflows-in-forked-repositories).
+
+To inspect or retry a failed run, use its numeric ID from the reported run URL:
+
+```bash
+gh run view RUN_ID --repo OWNER/REPO --log-failed
+gh run rerun RUN_ID --repo OWNER/REPO --failed
+```
+
+Compare the reported commit with the PR head before marking a PR ready. Changes made afterward
+need another run. Share the run URL in review coordination; routine results belong in CI rather
+than in the public PR description. A fork run is additional evidence and does not replace required
+upstream PR checks.
+
 ## Coverage Gaps
 
 The main current gaps are:
 
 - search-style LSP coverage is correctness-heavy, but not yet a larger benchmark-style workload with much deeper branching pressure
-- maintainer-surface regressions are documented and runnable, but separate from the default product CI lanes
+- Codex worktree-harness regressions are documented and runnable, but separate from the default
+  product CI lanes

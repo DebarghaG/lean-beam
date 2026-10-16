@@ -656,18 +656,32 @@ private def runWorkerExitSmoke
   let workerExitRequestId := some "worker-exit-slow"
   let slowPath := "tests/scenario/docs/SlowPoll.lean"
   let slowVersion ← updateVersion endpoint slowPath
+  let startedPath := root / ".tmp" / s!"beam-worker-exit-{← IO.monoNanosNow}.started"
+  IO.FS.createDirAll startedPath.parent.get!
   let slowTask ← IO.asTask (prio := Task.Priority.dedicated) <| runClientWithProgress endpoint {
     payload := .runAt {
       path := slowPath
       version := slowVersion
       line := 25
       character := 2
-      text := "poll_sleep_cmd"
+      text := s!"run_elab do\n  IO.FS.writeFile {(toJson startedPath.toString).compress} \"started\"\n  while true do\n    IO.sleep 30\n    Lean.Core.checkInterrupted"
     }
     clientRequestId? := workerExitRequestId
   }
-  IO.sleep 200
-  killLeanServerForEndpoint endpoint root
+  -- Killing before run_at enters Lean can send the request to a replacement
+  -- session instead. Wait for the command itself, not an assumed dispatch delay.
+  try
+    let rec waitStarted : Nat → IO Unit
+      | 0 => throw <| IO.userError "worker-exit run_at did not enter Lean within 15 seconds"
+      | n + 1 => do
+          unless ← startedPath.pathExists do
+            IO.sleep 10
+            waitStarted n
+    waitStarted 1500
+    killLeanServerForEndpoint endpoint root
+  finally
+    if ← startedPath.pathExists then
+      IO.FS.removeFile startedPath
   let (slowResp, slowEvents) ← awaitTask "worker-exit slow run_at" slowTask
   expectErrCode slowResp "workerExited"
   let some workerExitError := slowResp.error?

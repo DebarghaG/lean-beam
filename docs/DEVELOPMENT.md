@@ -637,8 +637,10 @@ that directory between task worktrees preserves the intended reuse. The save/che
 suite uses separate fixture packages and disables their artifact caches so a Lake replay cannot
 masquerade as a Beam-written artifact.
 
-CI restores the artifact cache for every Lean job, while `beam-fast` is the single writer for each
-OS and commit. Keeping one writer avoids concurrent immutable GitHub cache entries and bounds cache
+CI restores the artifact cache for every Lean job. In combined macOS mode, `beam-fast` writes the
+Linux cache and `macos-platform` writes the macOS cache. With `BEAM_FULL_MACOS_CI=true`, the
+`beam-fast` matrix writes both.
+Keeping one writer per OS and commit avoids concurrent immutable GitHub cache entries and bounds cache
 growth. CI archives the active root toolchain's exact Lake cache directory separately from the elan
 toolchain cache. It does not override `LAKE_CACHE_DIR`, so compatibility tests that select another
 toolchain continue using Lake's toolchain-isolated default instead of replaying incompatible native
@@ -646,6 +648,7 @@ artifacts.
 
 - LSP request / handle / scenario changes: `bash tests/test-lsp.sh`
 - Beam broker protocol / stream / barrier changes: `bash tests/test-beam-fast.sh`
+- MCP stdio lifecycle / workspace routing: `python3 tests/test-mcp-stdio.py --iterations 1 --restart-cycles 1 --timeout 60`
 - Beam save replay changes: `bash tests/test-beam-save-olean.sh`
 - Beam wrapper / install / bundle-resolution changes: `bash tests/test-beam-slow.sh`
 - Beam install / runtime layout changes: `bash tests/test-beam-install.sh`

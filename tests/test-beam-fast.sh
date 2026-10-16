@@ -20,7 +20,9 @@ bash scripts/check-daemon-safety.sh
 bash scripts/check-task-priority.sh
 bash scripts/check-markdown-links.sh
 bash scripts/check-toolchain-ci-matrix.sh
+python3 tests/test-toolchain-compat-owner.py
 python3 tests/test-installed-mcp-smoke.py
+python3 tests/test-extended-ci.py
 
 run_quiet_lake_build() {
   local log
@@ -266,18 +268,6 @@ if [ -n "$source_tree_dirty" ]; then
   assert_output_contains "lean-beam-mcp wrapper --version" "$mcp_wrapper_version" "source dirty: $source_tree_dirty"
 fi
 
-mcp_stdio_timeout="${BEAM_MCP_STDIO_TIMEOUT:-60}"
-mcp_stdio_env=()
-if [ "${BEAM_MCP_STDIO_SERVER_TRACE:-1}" != "0" ]; then
-  mcp_stdio_env+=("BEAM_MCP_SERVER_TRACE=1")
-  mcp_stdio_env+=("LEAN_BEAM_BROKER_WAIT_DIAGNOSTICS_WATCHDOG_MS=${BEAM_MCP_STDIO_WAIT_DIAGNOSTICS_WATCHDOG_MS:-10000}")
-fi
-env ${mcp_stdio_env[@]+"${mcp_stdio_env[@]}"} \
-  python3 tests/test-mcp-stdio.py \
-    --iterations 1 \
-    --restart-cycles 1 \
-    --timeout "$mcp_stdio_timeout" \
-    > /dev/null
 mcp_http_timeout="${BEAM_MCP_HTTP_TIMEOUT:-60}"
 python3 tests/test-mcp-http-bridge.py --timeout "$mcp_http_timeout" > /dev/null
 mcp_self_check_timeout="${BEAM_MCP_SELF_CHECK_TIMEOUT_MS:-120000}"

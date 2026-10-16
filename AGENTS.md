@@ -124,6 +124,9 @@ When working locally:
   `rm -rf` against repo-local `.beam`, install caches, or user homes as part of normal workflows
 - for LSP request / handle / scenario changes, run `bash tests/test-lsp.sh`
 - for Beam broker protocol / stream / barrier changes, run `bash tests/test-beam-fast.sh` first
+- for MCP stdio lifecycle or workspace-routing changes, also run
+  `python3 tests/test-mcp-stdio.py --iterations 1 --restart-cycles 1 --timeout 60`; the slow suite
+  owns the longer stdio stress run
 - for Beam wrapper / install / bundle-resolution changes, also run `bash tests/test-beam-slow.sh`
 - for supported Lean toolchain changes, add `bash tests/test-beam-toolchain-compat.sh <toolchain>`
 - for Rocq broker / wrapper changes, use `bash tests/test-beam-rocq.sh`
@@ -139,6 +142,12 @@ When working locally:
 
 - Before opening or editing a PR, run `scripts/pr-message.sh` and use the emitted title/body
   scaffold as the source of truth.
+- For macOS-sensitive changes to CI, native helpers, wrappers, installation, bundle resolution, or
+  supported toolchains, request the extended fork matrix when the combined upstream job is
+  insufficient: commit the task worktree, then run `python3 scripts/extended-ci.py --wait`.
+  The helper uses `ejgallego/lean-beam-ci-macos` by default. See
+  [extended CI guidance](docs/TESTING.md#extended-fork-ci) for fork setup and result handling.
+  Check that its reported commit matches the PR head before using the result to mark a PR ready.
 - Keep the public PR title/body suitable as the final squash commit message.
 - Start PR bodies with a short paragraph beginning `This PR ...`; summarize the problem and useful
   outcome instead of pasting local status notes.

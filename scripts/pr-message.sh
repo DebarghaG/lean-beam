@@ -119,6 +119,10 @@ printf -- "- Do not add generator or tool prefixes such as \`[codex]\` to the pu
 printf -- "- Do not add a \`Testing\` or \`Validation\` section for routine checks that CI already runs.\n"
 printf -- '- Mention tests only for rare validation that CI cannot represent, and explain why that result matters to review.\n'
 printf '\n'
+printf '## Extended CI\n'
+printf -- "- For macOS-sensitive changes needing the full fork matrix, commit local edits and run \`python3 scripts/extended-ci.py --wait\`.\n"
+printf -- '- Verify the reported head matches the PR head before marking it ready; see docs/TESTING.md#extended-fork-ci.\n'
+printf '\n'
 printf '## PR Title\n'
 printf '%s\n' "$title"
 printf '\n'
