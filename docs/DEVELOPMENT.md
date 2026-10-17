@@ -159,9 +159,16 @@ use it instead of maintaining their own operation lists.
 Workspace teardown must not wait for backend shutdown while holding `ServerRuntime.state`: reset,
 drop, and runtime close detach backend sessions and commit the new workspace state atomically, then
 wait for or terminate the detached processes after releasing the mutex. This keeps teardown of one
-workspace from blocking state access for every other workspace. Request-time cleanup follows the
-same detach-then-clean-up pattern and remains fenced to the request's workspace generation. Starting
-a replacement backend session may still perform process I/O while holding the mutex.
+workspace from blocking state access for every other workspace. If cleanup throws, a reset's new
+workspace ownership or a drop's removal remains committed; the error does not roll back the
+transition. Request-time cleanup follows the same detach-then-clean-up pattern and remains fenced
+to the request's workspace generation. Starting a replacement backend session may still perform
+process I/O while holding the mutex.
+
+Each workspace owns at most one Lean session. A reset or drop carries an optional detached session;
+broker-wide close follows the [shared runtime teardown contract](#broker-server-boundaries).
+Cancellation collects only present sessions selected by the request's workspace scope and matches
+pending work by its exact admission identity.
 
 ## MCP Projection Changes
 
@@ -352,9 +359,10 @@ replies use the same pending-request store and reader loop; do not add a second 
 admitted request for cancellation, shuts down backend sessions to unblock pending work, waits for
 all admitted dispatch scopes to unregister, and performs a final backend sweep so a request that
 was between admission and session creation cannot leave a late process behind. Concurrent and
-repeated callers wait for the same result. Transport owners decide what triggers closure and how
-their listener or stdio connection stops; they must not duplicate broker draining or backend
-teardown.
+repeated callers wait for the same result. Every teardown phase and detached session is attempted,
+retaining the first typed `IO.Error` as that shared result. Transport owners decide what triggers
+closure and how their listener or stdio connection stops; they must not duplicate broker draining
+or backend teardown.
 
 A newly spawned backend remains a provisional resource until its initialization response arrives
 within the 30-second startup deadline and the broker sends `initialized`. Any initialization error,
