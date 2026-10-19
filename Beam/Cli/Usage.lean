@@ -8,8 +8,8 @@ import Lean
 
 namespace Beam.Cli
 
-def usage : String :=
-  String.intercalate "\n" [
+def usage (maintenance : List String) : String :=
+  String.intercalate "\n" <| [
     "usage:",
     "  lean-beam --version",
     "  lean-beam version",
@@ -34,16 +34,14 @@ def usage : String :=
     "  lean-beam [--root PATH] close <path>",
     "  lean-beam [--root PATH] close-save <path> [+all-diagnostics]",
     "  lean-beam [--root PATH] feedback-report --stdin|--input <path> [--bundle none|dir|zip] [--output-dir <path>] [--no-redact]",
-    "  lean-beam prune [--apply] [--bundles]",
-    "  lean-beam validated-toolchains",
-    "  lean-beam compatible-release-lines",
+  ] ++ maintenance ++ [
     "  lean-beam [--root PATH] doctor",
     "  lean-beam [--root PATH] open-files",
     "  lean-beam [--root PATH] cancel <request-id>",
     "  lean-beam [--root PATH] stats",
     "  lean-beam [--root PATH] [--session-dir DIR] status",
     "  lean-beam --root PATH [--session-dir DIR] stop",
-    "  lean-beam --root PATH [--session-dir DIR] recover --generation ID | --force",
+    "  lean-beam --root PATH [--session-dir DIR] recover --generation ID",
     "",
     "Project-session commands accept an absolute --session-dir DIR as an exact alternate session selection.",
     "Use the same --root and --session-dir for serving, attachment, diagnostics, stopping, and recovery.",

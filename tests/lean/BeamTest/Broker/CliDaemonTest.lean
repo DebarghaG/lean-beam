@@ -9,6 +9,8 @@ import Beam.Broker.Errors
 import Beam.Cli.Args
 import Beam.Cli.Broker
 import Beam.Cli.Info
+import Beam.Cli.Installation
+import Beam.Broker.Config
 import Beam.Cli.LeanOperation
 import Beam.Cli.Lock
 import Beam.Cli.RuntimeBundle
@@ -98,17 +100,15 @@ private def ensureTestControlDir (root : System.FilePath) : IO System.FilePath :
 private def checkLeanConfigLowering : IO Unit := do
   let root := System.FilePath.mk "/tmp/beam-backend-config-project"
   let daemonBin := System.FilePath.mk "/bundle/bin/beam-daemon"
-  let lean : Beam.Cli.LeanBackendConfig := {
+  let lean : Beam.Runtime.Description := {
     command := "/toolchain/bin/lean"
     plugin := "/bundle/lib/libbeam_LSP.so"
     toolchain := "leanprover/lean4:v4.33.0"
-    bundleId := "lean-bundle"
+    identity := ⟨"/bundle", "lean-bundle"⟩
+    daemonBin
   }
-  require "Lean-only daemon arguments should contain exactly one complete Lean backend"
-    (lean.daemonArgs ==
-      #["--lean-cmd", lean.command, "--lean-plugin", lean.plugin.toString])
   let leanOnly :=
-    lean.toWorkspaceBinding
+    Beam.Cli.RuntimeDescription.toWorkspaceBinding lean
       Beam.Cli.projectDaemonWorkspaceId root
   require "Lean-only lowering should retain the complete Lean command"
     (leanOnly.leanCmd == lean.command)
@@ -117,15 +117,43 @@ private def checkLeanConfigLowering : IO Unit := do
   require "Lean-only lowering should retain the complete Lean toolchain"
     (leanOnly.toolchain == lean.toolchain)
   require "Lean-only lowering should retain its bundle identity"
-    (leanOnly.bundleId == lean.bundleId)
+    (leanOnly.bundleId == lean.identity.generation)
   let leanOnlyDesired : Beam.Cli.DesiredConfig := {
-    root, lean, daemonBin
+    root, runtime := lean
   }
   let differentPlugin : Beam.Cli.DesiredConfig := {
-    leanOnlyDesired with lean := { lean with plugin := "/other/plugin.so" }
+    leanOnlyDesired with runtime := { lean with plugin := "/other/plugin.so" }
   }
   require "configuration hashes should distinguish backend plugins"
     (leanOnlyDesired.configHash != differentPlugin.configHash)
+  let replacement := { leanOnlyDesired with runtime := { lean with identity := { lean.identity with generation := "replacement" } } }
+  require "generation changes at the same execution paths must invalidate session identity"
+    (replacement.configHash != leanOnlyDesired.configHash)
+  let independent := { lean with identity := { lean.identity with installation := "/independent" } }
+  require "installation ownership participates in frozen configuration identity"
+    (({ leanOnlyDesired with runtime := independent }).configHash != leanOnlyDesired.configHash)
+  require "matching paths and generations cannot erase installation ownership"
+    (!lean.sameRuntime independent)
+  require "selector aliases do not change execution identity"
+    (lean.sameRuntime { lean with toolchain := "alias" })
+
+  let alias := { lean with toolchain := "different diagnostic alias" }
+  require "selector aliases do not change the project configuration hash"
+    (alias.configHash root == lean.configHash root)
+  for changed in [{ lean with command := "/other/lean" },
+      { lean with plugin := "/other/plugin" }, { lean with daemonBin := "/other/helper" },
+      independent, { lean with identity := { lean.identity with generation := "new-generation" } }] do
+    require "each execution or ownership field changes the runtime binding" (!lean.sameRuntime changed)
+    require "each execution or ownership field changes the project configuration"
+      (lean.configHash root != changed.configHash root)
+  require "project root participates in the configuration hash"
+    (lean.configHash root != lean.configHash "/another/project")
+  require "CLI and daemon share the same configuration identity"
+    (leanOnlyDesired.configHash == lean.configHash root)
+  let lowered := Beam.Broker.BrokerConfig.ofRuntime root lean
+  require "daemon lowering retains the same execution components"
+    (lowered.lean?.any fun config => config.command == lean.command && config.plugin == lean.plugin &&
+      config.lakeHelper == lean.daemonBin)
 
 private def requireJsonNat (label field : String) (expected : Nat) (json : Json) : IO Unit := do
   let actual ← IO.ofExcept <| json.getObjValAs? Nat field
@@ -844,6 +872,7 @@ private def checkDaemonFailureContext : IO Unit := do
       }
       configHash := "config-test"
       daemonBin := "/tmp/beam-daemon-test"
+      installationRoot := root.toString
       startedAt := "2026-07-02T00:00:00Z"
     }
     IO.FS.writeFile registryPath ((toJson entry).pretty ++ "\n")
@@ -991,6 +1020,7 @@ private def writeTestRegistryEntry
     }
     configHash := "config-test"
     daemonBin := "/tmp/beam-daemon-test"
+    installationRoot := root.toString
     startedAt := "2026-07-05T00:00:00Z"
   }
   IO.FS.writeFile registryPath ((toJson entry).pretty ++ "\n")
@@ -1066,6 +1096,18 @@ private def checkTypedRegistryReads : IO Unit := do
 
     expectMalformedRegistry "missing daemon binary should fail the typed boundary"
       "invalid registry schema" (eraseObjectField validJson "daemonBin")
+    expectMalformedRegistry "missing installation ownership should fail the typed boundary"
+      "invalid registry schema" (eraseObjectField validJson "installationRoot")
+    expectMalformedRegistry "relative installation ownership should fail the typed boundary"
+      "owning installation root must be absolute"
+      (validJson.setObjVal! "installationRoot" (toJson "relative/installation"))
+    let previous := eraseObjectField (validJson.setObjVal! "schemaVersion" (toJson (4 : Nat)))
+      "installationRoot"
+    IO.FS.writeFile registryPath previous.compress
+    match ← Beam.Daemon.readRegistry root with
+    | .invalid (.unsupportedSchema 4) => pure ()
+    | state => throw <| IO.userError s!"descriptor without typed ownership was classified as {state.status}"
+    require "superseded descriptor remains preserved" ((← IO.FS.readFile registryPath) == previous.compress)
 
     let workspaceJson ← IO.ofExcept <| validJson.getObjVal? "workspace"
     for field in #["rocqCmd", "unexpected"] do
@@ -1143,10 +1185,10 @@ private def checkTypedRegistryReads : IO Unit := do
     | state => throw <| IO.userError s!"symlinked registry was classified as {state.status}"
     expectIoErrorContains "stop should reject a symlinked registry"
       "symbolic links are not accepted"
-      (Beam.Cli.shutdownRegisteredProjectDaemon root)
+      (Beam.Cli.shutdownRegisteredProjectDaemon (fun _ => pure ()) root)
     expectIoErrorContains "recovery should reject a symlinked registry"
       "symbolic links are not accepted"
-      (Beam.Cli.recoverProjectDaemon root none true)
+      (Beam.Cli.recoverProjectDaemon (fun _ => pure ()) root "fixture-generation")
     require "registry operations must not mutate a symlink target"
       ((← IO.FS.readFile symlinkTarget) == targetText)
   finally
@@ -1355,9 +1397,12 @@ private def checkLockLifecycle : IO Unit := do
     catch _ =>
       pure ()
 
+private def sampleSharedRuntimePath : String :=
+  if System.Platform.isWindows then "bin/libfixture.dll" else "lib/lean/libfixture.so"
+
 private def writeFakeBundleArtifacts (workspace : System.FilePath) : IO Unit := do
   let paths := Beam.Cli.leanBundlePathsFor workspace
-  for path in #[paths.daemon, paths.plugin] do
+  for path in #[paths.daemon, paths.plugin, workspace / ".lake/build" / sampleSharedRuntimePath] do
     if let some parent := path.parent then
       IO.FS.createDirAll parent
     IO.FS.writeFile path "fake artifact\n"
@@ -1367,6 +1412,7 @@ private def sampleFingerprint : Beam.Cli.ToolchainFingerprint := {
   leanPrefix := "/toolchains/a"
   leanLibDir := "/toolchains/a/lib/lean"
   lakeVersion := "Lake version 5.0.0-src (Lean version 4.33.0)"
+  compilerRevision := String.ofList (List.replicate 40 'a')
 }
 
 private def sampleFingerprintB : Beam.Cli.ToolchainFingerprint := {
@@ -1506,9 +1552,11 @@ private def writeBundleMetadataFile
     (toolchain sourceHash : String)
     (fingerprint : Beam.Cli.ToolchainFingerprint)
     (workspace : System.FilePath) : IO Unit := do
+  let artifacts ← Beam.Cli.snapshotBundleArtifacts (← Beam.Cli.ConstructionHash.select) (Beam.Cli.bundleWorkspaceFor bundleDir) #[sampleSharedRuntimePath]
   IO.FS.writeFile
     (Beam.Cli.bundleMetadataPath bundleDir)
-    ((Beam.Cli.bundleMetadataJson toolchain sourceHash fingerprint workspace "2026-06-05T00:00:00Z").pretty ++ "\n")
+    ((Beam.Cli.bundleMetadataJson toolchain sourceHash fingerprint workspace "2026-06-05T00:00:00Z"
+      #[sampleSharedRuntimePath] artifacts).pretty ++ "\n")
 
 private def checkRuntimeBundleHelpers : IO Unit := do
   let id := Beam.Cli.bundleIdFor "leanprover/lean4:v4.33.0" sampleFingerprint "source-a" "linux-x86_64"
@@ -1530,7 +1578,8 @@ private def checkRuntimeBundleHelpers : IO Unit := do
   let workspace := System.FilePath.mk "/tmp/beam-runtime-bundle-workspace"
   let paths := Beam.Cli.leanBundlePathsFor workspace
   require "bundle daemon path should point at workspace build output"
-    (paths.daemon == workspace / ".lake" / "build" / "bin" / "beam-daemon")
+    (paths.daemon == workspace / ".lake" / "build" / "bin" /
+      (if System.Platform.isWindows then "beam-daemon.exe" else "beam-daemon"))
   require "bundle plugin path should live under workspace build lib"
     (paths.plugin.toString.startsWith (workspace / ".lake" / "build" / "lib").toString)
   require "state directory should remain the public .beam path"
@@ -1542,6 +1591,7 @@ private def checkRuntimeBundleHelpers : IO Unit := do
     sampleFingerprint
     workspace
     "2026-06-05T00:00:00Z"
+    #[sampleSharedRuntimePath] #[]
   let schemaVersion ← IO.ofExcept <| metadata.getObjValAs? Nat "schemaVersion"
   let toolchain ← IO.ofExcept <| metadata.getObjValAs? String "toolchain"
   let toolchainFingerprint ← IO.ofExcept <| metadata.getObjValAs? Beam.Cli.ToolchainFingerprint "toolchainFingerprint"
@@ -1556,6 +1606,7 @@ private def checkRuntimeBundleHelpers : IO Unit := do
   require "bundle metadata should include workspace" (metadataWorkspace == workspace.toString)
 
 private def checkRuntimeBundleMetadataAcceptance : IO Unit := do
+  let hashes ← Beam.Cli.ConstructionHash.select
   let root := System.FilePath.mk s!"/tmp/beam-runtime-bundle-ready-test-{← IO.monoNanosNow}"
   let bundleDir := root / "bundle"
   let workspace := Beam.Cli.bundleWorkspaceFor bundleDir
@@ -1564,8 +1615,10 @@ private def checkRuntimeBundleMetadataAcceptance : IO Unit := do
   try
     writeFakeBundleArtifacts workspace
 
-    require "bundle should reject artifacts without metadata"
-      (!(← Beam.Cli.bundleReady bundleDir toolchain sourceHash sampleFingerprint))
+    let absent ← Beam.Cli.readVerifiedTarget hashes bundleDir toolchain sourceHash sampleFingerprint
+    require "missing metadata is a cache miss rather than invalid state" (match absent with
+      | .ok none => true
+      | _ => false)
 
     let invalidSchema := Json.mkObj [
       ("schemaVersion", toJson 0),
@@ -1577,32 +1630,36 @@ private def checkRuntimeBundleMetadataAcceptance : IO Unit := do
     ]
     IO.FS.writeFile (Beam.Cli.bundleMetadataPath bundleDir) (invalidSchema.pretty ++ "\n")
     require "bundle should reject unsupported metadata schema"
-      (!(← Beam.Cli.bundleReady bundleDir toolchain sourceHash sampleFingerprint))
+      (← Beam.Cli.readVerifiedTarget hashes bundleDir toolchain sourceHash sampleFingerprint).toOption.isNone
 
     writeBundleMetadataFile bundleDir toolchain "source-b" sampleFingerprint workspace
     require "bundle should reject stale source metadata"
-      (!(← Beam.Cli.bundleReady bundleDir toolchain sourceHash sampleFingerprint))
+      (← Beam.Cli.readVerifiedTarget hashes bundleDir toolchain sourceHash sampleFingerprint).toOption.isNone
 
     writeBundleMetadataFile bundleDir toolchain sourceHash sampleFingerprintB workspace
     require "bundle should reject stale toolchain fingerprint metadata"
-      (!(← Beam.Cli.bundleReady bundleDir toolchain sourceHash sampleFingerprint))
+      (← Beam.Cli.readVerifiedTarget hashes bundleDir toolchain sourceHash sampleFingerprint).toOption.isNone
 
     writeBundleMetadataFile bundleDir toolchain sourceHash sampleFingerprint (root / "elsewhere")
     require "bundle should reject metadata for a different workspace"
-      (!(← Beam.Cli.bundleReady bundleDir toolchain sourceHash sampleFingerprint))
-    require "bundle with mismatched workspace should not expose a source hash"
-      ((← Beam.Cli.completeBundleSourceHash? bundleDir).isNone)
+      (← Beam.Cli.readVerifiedTarget hashes bundleDir toolchain sourceHash sampleFingerprint).toOption.isNone
 
     writeBundleMetadataFile bundleDir toolchain sourceHash sampleFingerprint workspace
     require "bundle should accept matching artifacts and metadata"
-      (← Beam.Cli.bundleReady bundleDir toolchain sourceHash sampleFingerprint)
+      ((← Beam.Cli.readVerifiedTarget hashes bundleDir toolchain sourceHash sampleFingerprint).toOption.any Option.isSome)
+
+    let library := workspace / ".lake/build" / sampleSharedRuntimePath
+    IO.FS.removeFile library
+    require "bundle must reject a missing declared SDK library"
+      (← Beam.Cli.readVerifiedTarget hashes bundleDir toolchain sourceHash sampleFingerprint).toOption.isNone
+    IO.FS.writeFile library "fake artifact\n"
+    require "restoring the recorded SDK library restores cache completeness"
+      ((← Beam.Cli.readVerifiedTarget hashes bundleDir toolchain sourceHash sampleFingerprint).toOption.any Option.isSome)
 
     writeBundleMetadataFile bundleDir toolchain sourceHash sampleFingerprint (workspace / ".")
     require "bundle should accept metadata with equivalent diagnostic workspace spelling"
-      (← Beam.Cli.bundleReady bundleDir toolchain sourceHash sampleFingerprint)
+      ((← Beam.Cli.readVerifiedTarget hashes bundleDir toolchain sourceHash sampleFingerprint).toOption.any Option.isSome)
 
-    require "complete bundle source hash should use typed ready metadata"
-      ((← Beam.Cli.completeBundleSourceHash? bundleDir) == some sourceHash)
 
     let metadataPath := Beam.Cli.bundleMetadataPath bundleDir
     let metadataTarget := root / "metadata-symlink-target.json"
@@ -1610,9 +1667,7 @@ private def checkRuntimeBundleMetadataAcceptance : IO Unit := do
     IO.FS.removeFile metadataPath
     createSymlink "bundle metadata fixture" metadataTarget metadataPath
     require "bundle should reject symlinked metadata"
-      (!(← Beam.Cli.bundleReady bundleDir toolchain sourceHash sampleFingerprint))
-    require "bundle with symlinked metadata should not expose a source hash"
-      ((← Beam.Cli.completeBundleSourceHash? bundleDir).isNone)
+      (← Beam.Cli.readVerifiedTarget hashes bundleDir toolchain sourceHash sampleFingerprint).toOption.isNone
     IO.FS.removeFile metadataPath
     writeBundleMetadataFile bundleDir toolchain sourceHash sampleFingerprint workspace
 
@@ -1620,24 +1675,18 @@ private def checkRuntimeBundleMetadataAcceptance : IO Unit := do
     IO.FS.removeFile daemon
     IO.FS.createDir daemon
     require "bundle should reject a required artifact path that is a directory"
-      (!(← Beam.Cli.bundleReady bundleDir toolchain sourceHash sampleFingerprint))
-    require "bundle with a directory artifact should not expose a source hash"
-      ((← Beam.Cli.completeBundleSourceHash? bundleDir).isNone)
+      (← Beam.Cli.readVerifiedTarget hashes bundleDir toolchain sourceHash sampleFingerprint).toOption.isNone
     IO.FS.removeDir daemon
 
     let symlinkTarget := root / "daemon-symlink-target"
     IO.FS.writeFile symlinkTarget "fake artifact\n"
     createSymlink "bundle artifact fixture" symlinkTarget daemon
     require "bundle should reject a symlinked required artifact"
-      (!(← Beam.Cli.bundleReady bundleDir toolchain sourceHash sampleFingerprint))
-    require "bundle with a symlinked artifact should not expose a source hash"
-      ((← Beam.Cli.completeBundleSourceHash? bundleDir).isNone)
+      (← Beam.Cli.readVerifiedTarget hashes bundleDir toolchain sourceHash sampleFingerprint).toOption.isNone
     IO.FS.removeFile daemon
 
     require "bundle should reject matching metadata without required artifacts"
-      (!(← Beam.Cli.bundleReady bundleDir toolchain sourceHash sampleFingerprint))
-    require "incomplete bundle should not expose a source hash"
-      ((← Beam.Cli.completeBundleSourceHash? bundleDir).isNone)
+      (← Beam.Cli.readVerifiedTarget hashes bundleDir toolchain sourceHash sampleFingerprint).toOption.isNone
   finally
     try
       if ← root.pathExists then
@@ -1645,7 +1694,44 @@ private def checkRuntimeBundleMetadataAcceptance : IO Unit := do
     catch _ =>
       pure ()
 
+private def checkSdkRuntimeAdmission : IO Unit := do
+  let layout : Beam.Installation.Bundled.Layout := { root := "/sdk" }
+  let p : Beam.Installation.Bundled.Provenance := {
+    schemaVersion := 3
+    sourceCommit := "beam-source"
+    buildId := "build-one"
+    payloadHash := "payload-one"
+    components := {
+      frontends := {
+        cli := "bin/lean-beam"
+        mcp := "bin/lean-beam-mcp"
+        compilerRevision := Lean.githash
+      }
+      license := "LICENSE"
+      targets := #[{
+        lean := "bin/lean", daemon := "bin/beam-daemon", plugin := "lib/beam-plugin"
+        toolchain := "SDK compiler version", compilerRevision := Lean.githash
+        leanVersion := "SDK compiler version", lakeVersion := "Lake version"
+      }]
+    }
+    artifacts := #["bin/lean-beam", "bin/lean-beam-mcp", "bin/beam-daemon", "lib/beam-plugin", "LICENSE"].map
+      fun path => { source := path, destination := path, hash := String.ofList (List.replicate 64 'a') }
+  }
+  let compiled : Beam.BuildInfo.Identity := {
+    compilerRevision := Lean.githash, sourceRevision := p.sourceCommit, buildId := p.buildId
+  }
+  let validate := Beam.Installation.Bundled.validateProvenance (layout.home / "provenance.json") compiled Lean.githash
+  discard <| IO.ofExcept <| (validate p).mapError (·.message)
+  for invalid in [{ p with schemaVersion := 0 }, { p with payloadHash := "" },
+      { p with buildId := "replacement-build" }] do
+    require "invalid native construction record must fail" (!(validate invalid).isOk)
+  for revision in ["stale-compiler", ""] do
+    require "compiled compiler identity must be independently checked"
+      (!(Beam.Installation.Bundled.validateProvenance (layout.home / "provenance.json")
+        { compiled with compilerRevision := revision } Lean.githash p).isOk)
+
 def main : IO Unit := do
+  checkSdkRuntimeAdmission
   checkLeanConfigLowering
   checkProjectDaemonRequestSealing
   checkClientResponsePresentation

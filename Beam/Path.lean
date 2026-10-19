@@ -45,6 +45,12 @@ partial def resolvePathForCreation (path : System.FilePath) : IO System.FilePath
 def resolvePathAgainstRoot (root path : System.FilePath) : IO System.FilePath :=
   resolveExistingPath <| if path.isAbsolute then path else root / path
 
+/-- Compare already canonical recorded paths without consulting the filesystem, including cleanup. -/
+def sameCanonicalPath (left right : System.FilePath) : Bool :=
+  let key := fun (path : System.FilePath) =>
+    if System.Platform.isWindows then path.normalize.toString.toLower else path.toString
+  key left == key right
+
 /--
 Compare two filesystem paths after resolving their canonical spelling.
 

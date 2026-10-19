@@ -10,9 +10,12 @@ cd "$(dirname "$0")/.."
 
 # shellcheck source=tests/lib/beam-wrapper-common.sh
 . tests/lib/beam-wrapper-common.sh
+# shellcheck source=tests/lib/assertions.sh
+. tests/lib/assertions.sh
 
-beam_script="$PWD/scripts/lean-beam"
-beam_cli="$PWD/.lake/build/bin/beam-cli"
+: "${BEAM_TEST_INSTALLATION:?run tests/test-beam-slow.sh to construct the test installation}"
+beam_script="$BEAM_TEST_INSTALLATION/bin/lean-beam"
+beam_cli="$BEAM_TEST_INSTALLATION/libexec/beam-cli"
 
 if [ ! -x "$beam_script" ]; then
   echo "missing lean-beam wrapper at $beam_script" >&2
@@ -203,8 +206,6 @@ done
 resolved_tmp1="$(beam_test_realpath "$tmp1")"
 resolved_tmp2="$(beam_test_realpath "$tmp2")"
 
-fixture_toolchain="$(awk 'NR==1 {print $1}' tests/save_olean_project/lean-toolchain)"
-"$beam_cli" bundle-install "$fixture_toolchain"
 
 removed_selector_out="$tmp1/removed-selector.out"
 removed_selector_err="$tmp1/removed-selector.err"
@@ -243,7 +244,7 @@ absent_stop="$("$beam_script" --root "$tmp1" stop)"
 assert_json_field_equals "absent session stop response" "$absent_stop" ok true
 assert_json_field_equals "absent session stop state" "$absent_stop" result.state absent
 assert_json_field_equals "absent session stop changed" "$absent_stop" result.changed false
-absent_recover="$("$beam_script" --root "$tmp1" recover --force)"
+absent_recover="$("$beam_script" --root "$tmp1" recover --generation absent-generation)"
 assert_json_field_equals "absent session recovery response" "$absent_recover" ok true
 assert_json_field_equals "absent session recovery state" "$absent_recover" result.state absent
 assert_json_field_equals "absent session recovery change" "$absent_recover" result.changed false
@@ -273,7 +274,7 @@ rmdir "$tmp1/.beam"
 mkdir -p "$tmp1/.beam"
 chmod 700 "$tmp1/.beam"
 "$beam_script" --root "$tmp1" stop > /dev/null
-"$beam_script" --root "$tmp1" recover --force > /dev/null
+"$beam_script" --root "$tmp1" recover --generation absent-generation > /dev/null
 if [ -e "$tmp1/.beam/lock" ]; then
   echo "expected absent lifecycle commands not to create a lock in an existing session directory" >&2
   exit 1
@@ -287,7 +288,7 @@ mkdir -p "$symlink_control_target"
 chmod 755 "$symlink_control_target"
 symlink_target_mode_before="$(file_mode "$symlink_control_target")"
 ln -s "$symlink_control_target" "$tmp1/.beam"
-if "$beam_script" --root "$tmp1" recover --force \
+if "$beam_script" --root "$tmp1" recover --generation absent-generation \
     > "$tmp1/symlink-control.out" 2> "$tmp1/symlink-control.err"; then
   echo "expected a symlinked default control directory to be rejected" >&2
   exit 1
@@ -411,16 +412,18 @@ assert_json_field_equals "running session status workspace" "$status_json" resul
 assert_json_field_equals \
   "running session status directory" "$status_json" result.sessionDir "$resolved_tmp1/.beam"
 
-python3 - "$registry" "$tmp1" <<'PY'
+python3 - "$registry" "$tmp1" "$BEAM_TEST_INSTALLATION" <<'PY'
 import json
 import os
 import sys
 
-registry, root = sys.argv[1:]
+registry, root, installation = sys.argv[1:]
 with open(registry, encoding="utf-8") as stream:
     entry = json.load(stream)
-if entry.get("schemaVersion") != 4:
+if entry.get("schemaVersion") != 5:
     raise SystemExit(f"unexpected session schema: {entry.get('schemaVersion')}")
+if entry.get("installationRoot") != os.path.realpath(installation):
+    raise SystemExit(f"unexpected owning installation: {entry.get('installationRoot')}")
 workspace = entry.get("workspace")
 if not isinstance(workspace, dict):
     raise SystemExit(f"unexpected workspace binding: {workspace!r}")
@@ -705,20 +708,25 @@ if [ "$(cat "$stale_registry")" != "$legacy_before" ]; then
   cat "$stale_registry" >&2
   exit 1
 fi
-legacy_recover_json="$("$beam_script" --root "$tmp2" recover --force)"
-assert_json_field_equals "opaque registry recovery response" "$legacy_recover_json" ok true
-assert_json_field_equals "opaque registry recovery state" "$legacy_recover_json" result.state absent
-assert_json_field_equals "opaque registry recovery change" "$legacy_recover_json" result.changed true
-if [ -e "$stale_registry" ]; then
-  echo "expected explicit opaque recovery to quarantine the legacy descriptor" >&2
+if "$beam_script" --root "$tmp2" recover --generation opaque-generation \
+    > "$tmp2/opaque-recover.out" 2> "$tmp2/opaque-recover.err"; then
+  echo "expected opaque recovery to fail without established installation ownership" >&2
   exit 1
 fi
-legacy_quarantine="$(json_text_field "$legacy_recover_json" result.quarantinedPath)"
-if [ ! -f "$legacy_quarantine" ]; then
-  echo "expected opaque recovery to preserve quarantined evidence" >&2
-  printf '%s\n' "$legacy_recover_json" >&2
+if ! grep -Fq "installation ownership cannot be established" "$tmp2/opaque-recover.err"; then
+  cat "$tmp2/opaque-recover.err" >&2
   exit 1
 fi
+if "$beam_script" --root "$tmp2" recover --force > /dev/null 2>&1; then
+  echo "the removed force form must not bypass installation ownership" >&2
+  exit 1
+fi
+if [ "$(cat "$stale_registry")" != "$legacy_before" ]; then
+  echo "opaque recovery rejection must preserve evidence" >&2
+  exit 1
+fi
+# This descriptor was fabricated by this fixture and has no owner; archive it explicitly.
+mv "$stale_registry" "$tmp2/opaque-registry.operator-archive.json"
 
 # Once stop commits its draining fence, a delivery failure must remain a successful, typed
 # transition result rather than obscuring the state change. This fixture answers the identity
@@ -796,12 +804,17 @@ if ! wait_for_nonempty_file "$busy_port_file" "shutdown-delivery fixture"; then
 fi
 busy_port="$(cat "$busy_port_file")"
 DELIVERY_REGISTRY="$stale_registry" DELIVERY_ROOT="$resolved_tmp2" \
-    DELIVERY_PORT="$busy_port" python3 - <<'PY'
+    DELIVERY_PORT="$busy_port" DELIVERY_INSTALLATION="$BEAM_TEST_INSTALLATION" python3 - <<'PY'
 import json
 import os
+from pathlib import Path
+
+installation = Path(os.environ["DELIVERY_INSTALLATION"]).resolve()
+manifest = json.loads((installation / "manifest.json").read_text())
+daemon = (installation / manifest["components"]["targets"][0]["daemon"]).resolve()
 
 entry = {
-    "schemaVersion": 4,
+    "schemaVersion": 5,
     "lifecycle": "live",
     "daemonId": "delivery-failure-generation",
     "capability": "delivery-failure-capability",
@@ -817,7 +830,8 @@ entry = {
         "toolchain": "leanprover/lean4:v4.35.0",
     },
     "configHash": "delivery-failure-config",
-    "daemonBin": "/fixture/beam-daemon",
+    "daemonBin": str(daemon),
+    "installationRoot": str(installation),
     "startedAt": "2026-08-30T00:00:00Z",
 }
 with open(os.environ["DELIVERY_REGISTRY"], "w", encoding="utf-8") as stream:
@@ -850,18 +864,13 @@ assert_json_field_equals \
 
 start_slow_request "$tmp1" "shutdown-active" "shutdown-active"
 
-# The desired owner configuration includes installed bundle paths. An ordinary attaching command
-# must use the descriptor's frozen configuration without rebuilding a local desired hash. A second
-# owner still computes its proposed configuration and reports the mismatch without disturbing the
-# running generation.
-drift_bundle_dir="$tmp2/config-drift-bundles"
-mkdir -p "$drift_bundle_dir"
-rsync -a "$BEAM_INSTALL_BUNDLE_DIR/" "$drift_bundle_dir/"
+# Ambient cache variables cannot change this installation's fixed components or its live owner.
+drift_bundle_dir="$tmp2/ignored-bundle-cache"
 drift_out="$tmp1/config-drift.out"
 drift_err="$tmp1/config-drift.err"
 if ! BEAM_INSTALL_BUNDLE_DIR="$drift_bundle_dir" \
     "$beam_script" --root "$tmp1" stats > "$drift_out" 2> "$drift_err"; then
-  echo "expected ordinary attachment to use the owner's frozen configuration" >&2
+  echo "expected ordinary attachment to ignore the ambient cache path" >&2
   cat "$drift_err" >&2
   exit 1
 fi
@@ -872,15 +881,33 @@ drift_owner_err="$tmp1/config-drift-owner.err"
 if BEAM_INSTALL_BUNDLE_DIR="$drift_bundle_dir" \
     "$beam_script" --root "$tmp1" serve \
       > "$drift_owner_out" 2> "$drift_owner_err"; then
-  echo "expected a mismatched replacement owner to be rejected" >&2
+  echo "expected a duplicate owner to be rejected" >&2
   cat "$drift_owner_out" >&2
   exit 1
 fi
-if ! grep -Fq "current owner was preserved" "$drift_owner_err"; then
-  echo "expected replacement-owner drift diagnostics to preserve the current owner" >&2
+if ! grep -Fq "already owned by a foreground process" "$drift_owner_err"; then
+  echo "expected duplicate-owner diagnostics with the ambient cache override" >&2
   cat "$drift_owner_err" >&2
   exit 1
 fi
+assert_not_exists "$drift_bundle_dir"
+
+# A real target change must reject attachment while preserving the existing session and request.
+original_selector="$(cat "$tmp1/lean-toolchain")"
+alternate_selector="$(python3 - "$BEAM_TEST_INSTALLATION/manifest.json" "$original_selector" <<'PYTARGET'
+import json,sys
+targets=json.load(open(sys.argv[1]))['components']['targets']
+original=sys.argv[2].splitlines()[0].strip()
+print(next(target['toolchain'] for target in targets if target['toolchain'] != original))
+PYTARGET
+)"
+printf '%s\n' "$alternate_selector" > "$tmp1/lean-toolchain"
+if "$beam_script" --root "$tmp1" stats > /dev/null 2> "$drift_owner_err"; then
+  echo "expected attachment to reject a changed project target" >&2
+  exit 1
+fi
+assert_contains_literal "$drift_owner_err" 'current owner was preserved'
+printf '%s\n' "$original_selector" > "$tmp1/lean-toolchain"
 if [ -s "$drift_err" ]; then
   echo "ordinary frozen-configuration attachment produced unexpected diagnostics" >&2
   cat "$drift_out" >&2
@@ -1231,7 +1258,7 @@ rm -f -- "$explicit_symlink"
 mkdir -p "$nonprivate_control"
 chmod 755 "$nonprivate_control"
 nonprivate_mode_before="$(file_mode "$nonprivate_control")"
-if "$beam_script" --root "$tmp2" --session-dir "$nonprivate_control" recover --force \
+if "$beam_script" --root "$tmp2" --session-dir "$nonprivate_control" recover --generation absent-generation \
     > "$tmp2/nonprivate-control.out" 2> "$tmp2/nonprivate-control.err"; then
   echo "expected an existing non-private control directory to be rejected" >&2
   exit 1

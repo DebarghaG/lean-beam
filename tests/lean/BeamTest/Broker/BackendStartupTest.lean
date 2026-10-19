@@ -5,6 +5,7 @@ Author: Emilio J. Gallego Arias
 -/
 
 import Beam.Broker.LakeEnv
+import Beam.Broker.Server
 import BeamTest.Broker.TestUtil
 import Lean
 
@@ -18,8 +19,8 @@ private def checkWorkspaceFallbackEnv (root : System.FilePath) : IO Unit := do
   let invalidRoot := root / "invalid-workspace"
   IO.FS.createDirAll invalidRoot
   IO.FS.writeFile (invalidRoot / "lakefile.lean") "this is not a valid Lake configuration\n"
-  let noConfigEnv ← Beam.Broker.leanServerLakeEnv root (some "lean")
-  let invalidConfigEnv ← Beam.Broker.leanServerLakeEnv invalidRoot (some "lean")
+  let noConfigEnv ← Beam.Broker.computeServerEnvironment root "lean"
+  let invalidConfigEnv ← Beam.Broker.computeServerEnvironment invalidRoot "lean"
   for serverEnv in #[noConfigEnv, invalidConfigEnv] do
     let some (_, some loaderPath) := serverEnv.env.find? (·.1 == Lake.sharedLibPathEnvVar)
       | throw <| IO.userError s!"expected backend environment variable {Lake.sharedLibPathEnvVar}"
@@ -29,6 +30,49 @@ private def checkWorkspaceFallbackEnv (root : System.FilePath) : IO Unit := do
     throw <| IO.userError "plain Lean fallback unexpectedly marked Lake configuration invalid"
   unless invalidConfigEnv.env.any (·.1 == Lake.invalidConfigEnvVar) do
     throw <| IO.userError "invalid same-version Lake configuration should remain marked invalid"
+
+private def shellQuote (value : String) : String :=
+  "'" ++ value.replace "'" "'\\''" ++ "'"
+
+private def writeExecutable (path : System.FilePath) (body : String) : IO Unit := do
+  IO.FS.createDirAll (path.parent.getD ".")
+  IO.FS.writeFile path body
+  let rwx : IO.AccessRight := { read := true, write := true, execution := true }
+  IO.setAccessRights path ⟨rwx, rwx, rwx⟩
+
+private def checkCompilerMismatch (root plugin : System.FilePath) : IO Unit := do
+  let sdk := root / "mismatched SDK"
+  let command := sdk / "bin/lean"
+  let launched := root / "unexpected-server-launch"
+  writeExecutable command <| String.intercalate "\n" [
+    "#!/bin/sh", "case $1 in",
+    "--print-prefix) printf '%s\\n' " ++ shellQuote sdk.toString ++ ";;",
+    "--githash) printf '%s\\n' " ++ shellQuote (String.ofList (List.replicate 40 '0')) ++ ";;",
+    "*) printf launched > " ++ shellQuote launched.toString ++ "; exit 97;;", "esac", ""
+  ]
+  let helper := root / "mismatched-helper.sh"
+  writeExecutable helper <| "#!/bin/sh\nexec " ++
+    shellQuote (← daemonExe).toString ++
+    " --lean-cmd " ++ shellQuote command.toString ++ " \"$@\"\n"
+  let response ← Beam.Broker.runLakeHelperServerEnv helper { root := root.toString }
+  match response with
+  | .error failure =>
+      unless failure.message.contains "repair or reinstall" do
+        throw <| IO.userError s!"mismatch lost its repair diagnostic: {failure.message}"
+  | .ok _ => throw <| IO.userError "mismatched helper returned a successful environment"
+  let config := Beam.Broker.BrokerConfig.ofRuntime root {
+    command := command.toString, plugin, daemonBin := helper
+    toolchain := "fixture mismatch", identity := ⟨sdk, "fixture"⟩
+  }
+  let runtime ← Beam.Broker.ServerRuntime.create config "fixture"
+  try
+    let response ← runtime.dispatchRequest { Beam.Broker.Request.ensure with workspaceId? := some "fixture" }
+    if response.ok then throw <| IO.userError "mismatched helper allowed backend startup"
+    unless response.error?.any (fun error => error.message.contains "repair or reinstall") do
+      throw <| IO.userError s!"parent lost the helper mismatch error: {(toJson response).compress}"
+    if ← launched.pathExists then throw <| IO.userError "parent launched Lean despite helper mismatch"
+  finally
+    runtime.close
 
 private def fakeLeanInstallProbe :=
   "if [ \"${1:-}\" = \"--print-prefix\" ]; then exec lean --print-prefix; fi"
@@ -138,6 +182,7 @@ def main : IO Unit := do
   let plugin ← BeamTest.TestHarness.pluginPath
   try
     checkWorkspaceFallbackEnv root
+    checkCompilerMismatch root plugin
     let responseErrorServer ← writeResponseErrorServer root
     checkStartupFailure root responseErrorServer plugin "initialize failed" (checkPidGone := true)
     let abruptExitServer ← writeAbruptExitServer root

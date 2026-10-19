@@ -5,6 +5,7 @@ Author: Emilio J. Gallego Arias
 -/
 
 import Lean
+import Beam.Installation.Components
 import Beam.Cli.RuntimeBundle.Source
 import Beam.Cli.RuntimeBundle.ToolchainPolicy
 import Beam.System
@@ -18,6 +19,7 @@ structure ToolchainFingerprint where
   leanPrefix : String
   leanLibDir : String
   lakeVersion : String
+  compilerRevision : String
   deriving BEq, Repr, FromJson, ToJson
 
 def bundlePlatform : IO String := do
@@ -34,6 +36,7 @@ private def readRequiredToolchainCmdTrim (toolchain exe : String) (args : Array 
   let out ← IO.Process.output {
     cmd := "elan"
     args := #["run", toolchain, exe] ++ args
+    env := #[("LEAN_SYSROOT", none)]
   }
   if out.exitCode != 0 then
     throw <| IO.userError <| String.intercalate "\n" [
@@ -57,7 +60,8 @@ def toolchainFingerprintKey (fingerprint : ToolchainFingerprint) : String :=
     "lean-version", fingerprint.leanVersion,
     "lean-prefix", fingerprint.leanPrefix,
     "lean-libdir", fingerprint.leanLibDir,
-    "lake-version", fingerprint.lakeVersion
+    "lake-version", fingerprint.lakeVersion,
+    "compiler-revision", fingerprint.compilerRevision
   ]
 
 def toolchainFingerprintHash (fingerprint : ToolchainFingerprint) : String :=
@@ -67,25 +71,44 @@ def expectedCanonicalLeanVersionPrefix? (toolchain : String) : Option String := 
   let canonical ← parseCanonicalLeanToolchain? toolchain
   some s!"Lean (version {canonical.versionText},"
 
+/-- Observe one already selected SDK; every command uses this concrete installation. -/
+def fingerprintLeanInstallation (root : System.FilePath) : IO ToolchainFingerprint := do
+  let leanPrefix ← Beam.resolveExistingPath root
+  let readSelected := fun (exe : String) (args : Array String) => do
+    let command := leanPrefix / "bin" / (exe ++ if System.Platform.isWindows then ".exe" else "")
+    let out ← IO.Process.output {
+      cmd := command.toString, args, env := #[("LEAN_SYSROOT", none)]
+    }
+    unless out.exitCode == 0 && !out.stdout.trimAscii.isEmpty do
+      throw <| IO.userError s!"selected compiler command failed: {command}\n{out.stderr}"
+    pure <| Beam.trimLine out.stdout
+  let leanVersion ← readSelected "lean" #["--version"]
+  let leanLibDir ← readSelected "lean" #["--print-libdir"]
+  let lakeVersion ← readSelected "lake" #["--version"]
+  let compilerRevision ← readSelected "lean" #["--githash"]
+  unless Beam.Installation.hexDigest 40 compilerRevision do
+    throw <| IO.userError "selected Lean must report an exact compiler revision"
+  pure {
+    leanVersion
+    leanPrefix := leanPrefix.toString
+    leanLibDir
+    lakeVersion
+    compilerRevision
+  }
+
 def toolchainFingerprint (toolchain : String) : IO ToolchainFingerprint := do
   ensureElan
-  let leanVersion ← readRequiredToolchainCmdTrim toolchain "lean" #["--version"]
+  let leanPrefix ← Beam.resolveExistingPath <| System.FilePath.mk
+    (← readRequiredToolchainCmdTrim toolchain "lean" #["--print-prefix"])
+  let fingerprint ← fingerprintLeanInstallation leanPrefix
   if let some expectedPrefix := expectedCanonicalLeanVersionPrefix? toolchain then
-    unless leanVersion.startsWith expectedPrefix do
+    unless fingerprint.leanVersion.startsWith expectedPrefix do
       throw <| IO.userError <| String.intercalate "\n" [
         s!"Lean toolchain name/version mismatch: {toolchain}",
         s!"expected `lean --version` to start with: {expectedPrefix}",
-        s!"actual `lean --version`: {leanVersion}"
+        s!"actual `lean --version`: {fingerprint.leanVersion}"
       ]
-  let leanPrefix ← readRequiredToolchainCmdTrim toolchain "lean" #["--print-prefix"]
-  let leanLibDir ← readRequiredToolchainCmdTrim toolchain "lean" #["--print-libdir"]
-  let lakeVersion ← readRequiredToolchainCmdTrim toolchain "lake" #["--version"]
-  pure {
-    leanVersion
-    leanPrefix
-    leanLibDir
-    lakeVersion
-  }
+  pure fingerprint
 
 def bundleIdFor (toolchain : String) (fingerprint : ToolchainFingerprint) (source platformKey : String) :
     String :=
@@ -95,17 +118,17 @@ def bundleIdFor (toolchain : String) (fingerprint : ToolchainFingerprint) (sourc
   let acc := mixField acc platformKey
   s!"{acc.toNat}"
 
-def bundleDirForFingerprint (cacheRoot home : System.FilePath) (toolchain : String)
-    (fingerprint : ToolchainFingerprint) : IO (System.FilePath × String × String) := do
-  let platformKey ← bundlePlatform
-  let srcHash ← sourceHash home
-  let bundleId := bundleIdFor toolchain fingerprint srcHash platformKey
-  pure (cacheRoot / platformKey / bundleId, bundleId, srcHash)
+/-- Inputs shared by all targets in one construction operation; source files stay immutable. -/
+structure ConstructionInputs where
+  sourceHash : String
+  platform : String
 
-def bundleDirFor (cacheRoot home : System.FilePath) (toolchain : String) :
-    IO (System.FilePath × String × String × ToolchainFingerprint) := do
-  let fingerprint ← toolchainFingerprint toolchain
-  let (bundleDir, bundleId, srcHash) ← bundleDirForFingerprint cacheRoot home toolchain fingerprint
-  pure (bundleDir, bundleId, srcHash, fingerprint)
+def captureConstructionInputs (home : System.FilePath) : IO ConstructionInputs := do
+  pure { sourceHash := ← sourceHash home, platform := ← bundlePlatform }
+
+def bundleDirForFingerprint (cacheRoot : System.FilePath) (inputs : ConstructionInputs)
+    (toolchain : String) (fingerprint : ToolchainFingerprint) : System.FilePath × String :=
+  let bundleId := bundleIdFor toolchain fingerprint inputs.sourceHash inputs.platform
+  (cacheRoot / inputs.platform / bundleId, bundleId)
 
 end Beam.Cli

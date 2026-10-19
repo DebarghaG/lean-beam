@@ -1,0 +1,111 @@
+{
+  "native": {
+    "record": {
+      "schemaVersion": 3,
+      "sourceCommit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "buildId": "cccccccccccccccccccccccccccccccc",
+      "payloadHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "components": {
+        "frontends": {
+          "cli": "bin/lean-beam",
+          "mcp": "bin/lean-beam-mcp",
+          "compilerRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "license": "LICENSE",
+        "targets": [
+          {
+            "lean": "bin/lean",
+            "daemon": "bin/beam-daemon",
+            "plugin": "lib/lean-beam/plugin.so",
+            "toolchain": "fixture:α",
+            "compilerRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "leanVersion": "Lean fixture \"quoted\"",
+            "lakeVersion": "Lake fixture \\path"
+          }
+        ]
+      },
+      "artifacts": [
+        {
+          "source": "bin/lean-beam",
+          "destination": "bin/lean-beam",
+          "hash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        {
+          "source": "bin/lean-beam-mcp",
+          "destination": "bin/lean-beam-mcp",
+          "hash": "2222222222222222222222222222222222222222222222222222222222222222"
+        },
+        {
+          "source": "LICENSE",
+          "destination": "LICENSE",
+          "hash": "3333333333333333333333333333333333333333333333333333333333333333"
+        },
+        {
+          "source": "bin/beam-daemon",
+          "destination": "bin/beam-daemon",
+          "hash": "4444444444444444444444444444444444444444444444444444444444444444"
+        },
+        {
+          "source": "lib/lean-beam/plugin.so",
+          "destination": "lib/lean-beam/plugin.so",
+          "hash": "5555555555555555555555555555555555555555555555555555555555555555"
+        }
+      ]
+    },
+    "sha256": "6811c5cba69f49ea94c0256de63c33c9f625e2f74e7d13295b5acbaa6ef5114d"
+  },
+  "standalone": {
+    "record": {
+      "schemaVersion": 4,
+      "sourceCommit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "payloadHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "components": {
+        "frontends": {
+          "cli": "bin/lean-beam",
+          "mcp": "bin/lean-beam-mcp",
+          "compilerRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "license": "LICENSE",
+        "targets": [
+          {
+            "lean": "/fixture SDK/bin/lean",
+            "daemon": "bin/beam-daemon",
+            "plugin": "lib/lean-beam/plugin.so",
+            "toolchain": "fixture:α",
+            "compilerRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "leanVersion": "Lean fixture \"quoted\"",
+            "lakeVersion": "Lake fixture \\path"
+          }
+        ]
+      },
+      "artifacts": [
+        {
+          "source": "bin/lean-beam",
+          "destination": "bin/lean-beam",
+          "hash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        {
+          "source": "bin/lean-beam-mcp",
+          "destination": "bin/lean-beam-mcp",
+          "hash": "2222222222222222222222222222222222222222222222222222222222222222"
+        },
+        {
+          "source": "LICENSE",
+          "destination": "LICENSE",
+          "hash": "3333333333333333333333333333333333333333333333333333333333333333"
+        },
+        {
+          "source": "bin/beam-daemon",
+          "destination": "bin/beam-daemon",
+          "hash": "4444444444444444444444444444444444444444444444444444444444444444"
+        },
+        {
+          "source": "lib/lean-beam/plugin.so",
+          "destination": "lib/lean-beam/plugin.so",
+          "hash": "5555555555555555555555555555555555555555555555555555555555555555"
+        }
+      ]
+    },
+    "sha256": "3c18353525a660dd3b329e4c94efe3ba29e6bac7662050e3020b34ff2a3e6184"
+  }
+}

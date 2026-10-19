@@ -70,6 +70,8 @@ private def validateSessionDescriptor (entry : SessionDescriptor) : Except Strin
     throw "session descriptor configuration hash must not be empty"
   if entry.daemonBin.isEmpty then
     throw "session descriptor daemon binary must not be empty"
+  unless (System.FilePath.mk entry.installationRoot).isAbsolute do
+    throw "session descriptor owning installation root must be absolute"
   if entry.port == 0 then
     throw "session descriptor port must be in range 1-65535"
   validateWorkspaceBinding entry.workspace

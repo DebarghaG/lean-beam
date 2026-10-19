@@ -19,33 +19,18 @@ namespace Beam.Broker
 
 open Lake
 
-private def computeLakeEnv (leanCmd? : Option String) : IO Lake.Env := do
+private def computeLakeEnv (command : String) : IO Lake.Env := do
+  if command.trimAscii.isEmpty then throw <| IO.userError "empty selected Lean command"
+  let some lean ← Lake.findLeanCmdInstall? command
+    | throw <| IO.userError s!"could not load the selected Lean installation: {command}"
+  let lake := Lake.LakeInstall.ofLean lean
   let elan? ← Lake.findElanInstall?
-  let lean? ←
-    match leanCmd? with
-    | some leanCmd =>
-        if leanCmd.trimAscii.isEmpty then
-          pure none
-        else
-          Lake.findLeanCmdInstall? leanCmd
-    | none =>
-        pure none
-  let (lean?, lake?) ←
-    match lean? with
-    | some lean => pure (some lean, some (Lake.LakeInstall.ofLean lean))
-    | none =>
-        let (_, lean?, lake?) ← Lake.findInstall?
-        pure (lean?, lake?)
-  let some lean := lean?
-    | throw <| IO.userError "could not locate Lean installation for Lake workspace loading"
-  let some lake := lake?
-    | throw <| IO.userError "could not locate Lake installation for workspace loading"
   match ← (Lake.Env.compute lake lean elan?).toBaseIO with
   | .ok env => pure env
   | .error err => throw <| IO.userError s!"failed to compute Lake environment: {err}"
 
 /-- Live Lean values require agreement with both the elaborating compiler and loaded runtime. -/
-private def canLoadWorkspaceInProcess (lakeEnv : Lake.Env) : Bool :=
+private def compilerRevisionsMatch (lakeEnv : Lake.Env) : Bool :=
   Beam.compilerRevisionsMatch Beam.compiledCompilerRevision Lean.githash lakeEnv.lean.githash
 
 private def detectConfigFile? (root : FilePath) : IO (Option (FilePath × FilePath)) := do
@@ -91,10 +76,10 @@ inductive WorkspaceLoadResult where
   | loaded (workspace : Workspace)
   | leanBuildMismatch
 
-def loadWorkspaceForRoot (root : FilePath) (leanCmd? : Option String) : IO WorkspaceLoadResult := do
+def loadWorkspaceForRoot (root : FilePath) (leanCmd : String) : IO WorkspaceLoadResult := do
   let (relConfigFile, configFile) ← detectConfigFile root
-  let lakeEnv ← computeLakeEnv leanCmd?
-  unless canLoadWorkspaceInProcess lakeEnv do
+  let lakeEnv ← computeLakeEnv leanCmd
+  unless compilerRevisionsMatch lakeEnv do
     return .leanBuildMismatch
   let (ws?, messages) ← loadWorkspaceWithConfig root lakeEnv relConfigFile configFile
   if let some ws := ws? then
@@ -102,18 +87,18 @@ def loadWorkspaceForRoot (root : FilePath) (leanCmd? : Option String) : IO Works
   else
     throw <| IO.userError <| loadWorkspaceFailureMessage root messages
 
-private def leanServerLakeEnvInProcess
+/-- Helper-side Lake evaluation for its bound target; never selects a process strategy. -/
+def computeServerEnvironment
     (root : FilePath)
-    (leanCmd? : Option String) : IO LeanServerLakeEnv := do
-  let lakeEnv ← computeLakeEnv leanCmd?
-  -- Always preserve the target runtime environment: the Beam plugin links against target Lean/Lake
-  -- libraries even when there is no Lake configuration or this Lake version cannot load it.
+    (leanCmd : String) : IO LeanServerLakeEnv := do
+  let lakeEnv ← computeLakeEnv leanCmd
+  unless compilerRevisionsMatch lakeEnv do
+    throw <| IO.userError "installed Lake helper and selected target have different compiler revisions; repair or reinstall this Beam installation"
+  -- A matching target without a Lake configuration still needs its base runtime environment.
   let fallback : LeanServerLakeEnv := {
     env := lakeEnv.vars
     moreServerArgs := #[]
   }
-  if !canLoadWorkspaceInProcess lakeEnv then
-    return fallback
   let some (relConfigFile, configFile) ← detectConfigFile? root
     | pure fallback
   let (ws?, messages) ← loadWorkspaceWithConfig root lakeEnv relConfigFile configFile
@@ -128,20 +113,5 @@ private def leanServerLakeEnvInProcess
         (Lake.invalidConfigEnvVar, some <| String.intercalate "\n" messages.toList)
       moreServerArgs := #[]
     }
-
-def leanServerLakeEnv
-    (root : FilePath)
-    (leanCmd? : Option String)
-    (lakeHelper? : Option FilePath := none) : IO LeanServerLakeEnv := do
-  match lakeHelper?, leanCmd? with
-  | some helper, some leanCmd =>
-      match ← runLakeHelperServerEnv helper ({
-          root := root.toString
-          leanCmd
-        } : LakeHelperEnvRequest) with
-      | .ok serverEnv => pure serverEnv
-      | .error failure => throw <| IO.userError failure.message
-  | _, _ =>
-      leanServerLakeEnvInProcess root leanCmd?
 
 end Beam.Broker

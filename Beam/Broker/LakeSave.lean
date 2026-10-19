@@ -60,24 +60,16 @@ elab "mkModuleOutputDescrsCompat(" isModule:term ", " olean:term ", " oleanServe
     } : ModuleOutputDescrs))
   Lean.Elab.Term.elabTerm outputs none
 
-inductive LeanSaveTracePlan where
-  | inProcess (depTrace : BuildTrace)
-  | targetProcess (helper : FilePath) (traceMetadata : Json)
-
-structure LeanSaveSpec where
+/-- Helper-local preparation retains live Lake values, with no delegated alternative. -/
+structure LocalLeanSaveSpec extends LeanSaveOutputs where
   relPath : String
   moduleName : String
   unsupportedSetupReason? : Option String := none
-  oleanPath : FilePath
-  oleanServerPath? : Option FilePath := none
-  oleanPrivatePath? : Option FilePath := none
-  ileanPath : FilePath
-  irPath? : Option FilePath := none
-  irSigPath? : Option FilePath := none
-  cPath : FilePath
-  bcPath? : Option FilePath := none
-  tracePath : FilePath
-  tracePlan : LeanSaveTracePlan
+  depTrace : BuildTrace
+
+/-- Broker-side preparation retains only serialized target metadata and its admitted helper. -/
+structure LeanSaveSpec extends LakeHelperSaveSpec where
+  helper : FilePath
 
 structure SourceSnapshot where
   hash : Hash
@@ -156,15 +148,15 @@ private def buildDepTrace
           message := e.toString
         }
 
-private def mkLeanSaveSpecInProcess
+def computeSaveSpecification
     (root path : FilePath)
     (snapshot : SourceSnapshot)
-    (leanCmd? : Option String := none) : IO (Except BrokerFailure LeanSaveSpec) := do
+    (leanCmd : String) : IO (Except BrokerFailure LocalLeanSaveSpec) := do
   try
     let root ← Beam.resolveExistingPath root
     let path ← Beam.resolvePathAgainstRoot root path
     let ws ←
-      match ← loadWorkspaceForRoot root leanCmd? with
+      match ← loadWorkspaceForRoot root leanCmd with
       | .loaded ws => pure ws
       | .leanBuildMismatch =>
           return .error {
@@ -200,7 +192,7 @@ private def mkLeanSaveSpecInProcess
       cPath := mod.cFile
       bcPath? := if Lean.Internal.hasLLVMBackend () then some mod.bcFile else none
       tracePath := mod.traceFile
-      tracePlan := .inProcess inputs.trace
+      depTrace := inputs.trace
     }
   catch e =>
     pure <| .error {
@@ -208,70 +200,35 @@ private def mkLeanSaveSpecInProcess
       message := e.toString
     }
 
-private def leanSaveSpecOfHelperSpec
-    (helper : FilePath)
-    (spec : LakeHelperSaveSpec) : LeanSaveSpec := {
-    relPath := spec.relPath
-    moduleName := spec.moduleName
-    unsupportedSetupReason? := spec.unsupportedSetupReason?
-    oleanPath := FilePath.mk spec.oleanPath
-    oleanServerPath? := spec.oleanServerPath?.map FilePath.mk
-    oleanPrivatePath? := spec.oleanPrivatePath?.map FilePath.mk
-    ileanPath := FilePath.mk spec.ileanPath
-    irPath? := spec.irPath?.map FilePath.mk
-    irSigPath? := spec.irSigPath?.map FilePath.mk
-    cPath := FilePath.mk spec.cPath
-    bcPath? := spec.bcPath?.map FilePath.mk
-    tracePath := FilePath.mk spec.tracePath
-    tracePlan := .targetProcess helper spec.traceMetadata
-  }
-
-private def mkLeanSaveSpecWithHelper
+/-- Broker-side preparation always requests the admitted helper. -/
+def requestSaveSpecification
     (helper root path : FilePath)
     (snapshot : SourceSnapshot)
-    (leanCmd : String) : IO (Except BrokerFailure LeanSaveSpec) := do
+    (control : LakeHelperControl := {}) : IO (Except BrokerFailure LeanSaveSpec) := do
   let request : LakeHelperSaveRequest := {
     root := root.toString
     path := path.toString
-    leanCmd
     sourceHash := snapshot.hash.toString
     sourceMTimeSec := snapshot.mtime.sec
     sourceMTimeNsec := snapshot.mtime.nsec.toNat
   }
-  match ← runLakeHelperPrepareSave helper request with
+  match ← runLakeHelperPrepareSave helper request control with
   | .error failure => pure <| .error failure
-  | .ok spec => pure <| .ok (leanSaveSpecOfHelperSpec helper spec)
-
-def mkLeanSaveSpec
-    (root path : FilePath)
-    (snapshot : SourceSnapshot)
-    (leanCmd? : Option String := none)
-    (lakeHelper? : Option FilePath := none) : IO (Except BrokerFailure LeanSaveSpec) := do
-  match lakeHelper?, leanCmd? with
-  | some helper, some leanCmd =>
-      mkLeanSaveSpecWithHelper helper root path snapshot leanCmd
-  | _, _ =>
-      mkLeanSaveSpecInProcess root path snapshot leanCmd?
+  | .ok spec => pure <| .ok { toLakeHelperSaveSpec := spec, helper }
 
 private def hashDescr (path : FilePath) (ext : String) : IO ArtifactDescr :=
   return artifactWithExt (← computeHash path) ext
 
-private def leanSaveOutputs
-    (oleanPath : FilePath)
-    (oleanServerPath? oleanPrivatePath? : Option FilePath)
-    (ileanPath : FilePath)
-    (irPath? irSigPath? : Option FilePath)
-    (cPath : FilePath)
-    (bcPath? : Option FilePath) : IO ModuleOutputDescrs := do
-  let isModule := oleanServerPath?.isSome
-  let olean ← hashDescr oleanPath "olean"
-  let oleanServer? ← oleanServerPath?.mapM (fun path => hashDescr path "olean.server")
-  let oleanPrivate? ← oleanPrivatePath?.mapM (fun path => hashDescr path "olean.private")
-  let ilean ← hashDescr ileanPath "ilean"
-  let ir? ← irPath?.mapM (fun path => hashDescr path "ir")
-  let irSig? ← irSigPath?.mapM (fun path => hashDescr path "ir.sig")
-  let c ← hashDescr cPath "c"
-  let bc? ← bcPath?.mapM (fun path => hashDescr path "bc")
+private def leanSaveOutputs (outputs : LeanSaveOutputs) : IO ModuleOutputDescrs := do
+  let isModule := outputs.oleanServerPath?.isSome
+  let olean ← hashDescr outputs.oleanPath "olean"
+  let oleanServer? ← outputs.oleanServerPath?.mapM (fun path => hashDescr path "olean.server")
+  let oleanPrivate? ← outputs.oleanPrivatePath?.mapM (fun path => hashDescr path "olean.private")
+  let ilean ← hashDescr outputs.ileanPath "ilean"
+  let ir? ← outputs.irPath?.mapM (fun path => hashDescr path "ir")
+  let irSig? ← outputs.irSigPath?.mapM (fun path => hashDescr path "ir.sig")
+  let c ← hashDescr outputs.cPath "c"
+  let bc? ← outputs.bcPath?.mapM (fun path => hashDescr path "bc")
   pure <| mkModuleOutputDescrsCompat(
     isModule, olean, oleanServer?, oleanPrivate?, ilean, ir?, irSig?, c, bc?)
 
@@ -304,53 +261,28 @@ def invalidateLeanSaveTrace (spec : LeanSaveSpec) : IO Unit := do
 private def writeLeanSaveTraceWithMetadata
     (request : LakeHelperWriteTraceRequest) : IO Unit := do
   let metadata : BuildMetadata ← IO.ofExcept <| fromJson? request.traceMetadata
-  let outputs ← leanSaveOutputs
-    (FilePath.mk request.oleanPath)
-    (request.oleanServerPath?.map FilePath.mk)
-    (request.oleanPrivatePath?.map FilePath.mk)
-    (FilePath.mk request.ileanPath)
-    (request.irPath?.map FilePath.mk)
-    (request.irSigPath?.map FilePath.mk)
-    (FilePath.mk request.cPath)
-    (request.bcPath?.map FilePath.mk)
+  let outputs ← leanSaveOutputs request.toLeanSaveOutputs
   let metadata := { metadata with outputs? := some <| toJson outputs }
-  let tracePath := FilePath.mk request.tracePath
+  let tracePath := request.tracePath
   writeTraceAtomically tracePath fun stagedTrace =>
     BuildMetadata.writeFile stagedTrace metadata
 
-def writeLeanSaveTrace (spec : LeanSaveSpec) : IO (Except BrokerFailure Unit) := do
-  try
-    match spec.tracePlan with
-    | .inProcess depTrace =>
-        let outputs ← leanSaveOutputs spec.oleanPath spec.oleanServerPath?
-          spec.oleanPrivatePath? spec.ileanPath spec.irPath? spec.irSigPath? spec.cPath spec.bcPath?
-        writeTraceAtomically spec.tracePath fun stagedTrace =>
-          writeBuildTrace stagedTrace depTrace outputs {}
-        pure (.ok ())
-    | .targetProcess helper traceMetadata =>
-        let request : LakeHelperWriteTraceRequest := {
-          oleanPath := spec.oleanPath.toString
-          oleanServerPath? := spec.oleanServerPath?.map (·.toString)
-          oleanPrivatePath? := spec.oleanPrivatePath?.map (·.toString)
-          ileanPath := spec.ileanPath.toString
-          irPath? := spec.irPath?.map (·.toString)
-          irSigPath? := spec.irSigPath?.map (·.toString)
-          cPath := spec.cPath.toString
-          bcPath? := spec.bcPath?.map (·.toString)
-          tracePath := spec.tracePath.toString
-          traceMetadata
-        }
-        match ← runLakeHelperWriteSaveTrace helper request with
-        | .ok _ => pure (.ok ())
-        | .error failure => pure (.error failure)
-  catch e =>
-    pure <| .error {
-      code := .internalError
-      message := e.toString
-    }
+/-- Trusted helper-local callers write live traces directly. -/
+def writeLocalLeanSaveTrace (spec : LocalLeanSaveSpec) : IO Unit := do
+  let outputs ← leanSaveOutputs spec.toLeanSaveOutputs
+  writeTraceAtomically spec.tracePath fun stagedTrace =>
+    writeBuildTrace stagedTrace spec.depTrace outputs {}
+
+/-- Broker trace publication always crosses the helper boundary. -/
+def writeLeanSaveTrace (spec : LeanSaveSpec) (control : LakeHelperControl := {}) :
+    IO (Except BrokerFailure Unit) := do
+  let request : LakeHelperWriteTraceRequest := spec.toLakeHelperSaveSpec.toLakeHelperWriteTraceRequest
+  match ← runLakeHelperWriteSaveTrace spec.helper request control with
+  | .ok _ => pure (.ok ())
+  | .error failure => pure (.error failure)
 
 def lakeHelperSaveSpec
-    (request : LakeHelperSaveRequest) : IO (Except BrokerFailure LakeHelperSaveSpec) := do
+    (request : LakeHelperSaveRequest) (leanCmd : String) : IO (Except BrokerFailure LakeHelperSaveSpec) := do
   let some sourceHash := Hash.ofString? request.sourceHash
     | return .error {
         code := .invalidParams
@@ -365,31 +297,17 @@ def lakeHelperSaveSpec
     hash := sourceHash
     mtime := { sec := request.sourceMTimeSec, nsec := request.sourceMTimeNsec.toUInt32 }
   }
-  match ← mkLeanSaveSpecInProcess
-      (FilePath.mk request.root) (FilePath.mk request.path) snapshot (some request.leanCmd) with
+  match ← computeSaveSpecification
+      (FilePath.mk request.root) (FilePath.mk request.path) snapshot leanCmd with
   | .error failure => pure <| .error failure
   | .ok spec =>
-      let traceMetadata ←
-        match spec.tracePlan with
-        | .inProcess depTrace => pure <| toJson (BuildMetadata.ofBuild depTrace Json.null {})
-        | .targetProcess .. =>
-            return .error {
-              code := .internalError
-              message := "target Lake helper unexpectedly produced a delegated save trace"
-            }
+      let traceMetadata := toJson (BuildMetadata.ofBuild spec.depTrace Json.null {})
       pure <| .ok {
+        root := FilePath.mk request.root
         relPath := spec.relPath
         moduleName := spec.moduleName
         unsupportedSetupReason? := spec.unsupportedSetupReason?
-        oleanPath := spec.oleanPath.toString
-        oleanServerPath? := spec.oleanServerPath?.map (·.toString)
-        oleanPrivatePath? := spec.oleanPrivatePath?.map (·.toString)
-        ileanPath := spec.ileanPath.toString
-        irPath? := spec.irPath?.map (·.toString)
-        irSigPath? := spec.irSigPath?.map (·.toString)
-        cPath := spec.cPath.toString
-        bcPath? := spec.bcPath?.map (·.toString)
-        tracePath := spec.tracePath.toString
+        toLeanSaveOutputs := spec.toLeanSaveOutputs
         traceMetadata
       }
 

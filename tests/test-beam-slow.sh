@@ -44,11 +44,27 @@ fixture_toolchain="$(awk 'NR==1 {print $1}' tests/save_olean_project/lean-toolch
 # Fake agent homes isolate install state; the wrapper still needs the host Lean toolchain cache.
 host_elan_home="${ELAN_HOME:-$HOME/.elan}"
 
+run_step "install publication" bash tests/test-install-publication.sh
+
 run_step "build" lake build \
   Beam.LSP:shared \
   beam-cli \
   beam-daemon \
-  lean-beam-mcp
+  beam-lake-helper-client-fixture \
+  lean-beam-mcp \
+  beam-install-runtime
+
+run_step "construct complete test installation" env \
+  HOME="$tmp_env_root/home" ELAN_HOME="$host_elan_home" \
+  BEAM_INSTALL_ROOT="$tmp_env_root/install-root" BEAM_BIN_HOME="$tmp_env_root/bin" \
+  bash scripts/install-beam.sh --dont-ask --toolchain "$toolchain" --toolchain "$fixture_toolchain"
+BEAM_TEST_INSTALLATION="$(cd -P "$tmp_env_root/install-root/current" && pwd)"
+export BEAM_TEST_INSTALLATION
+
+run_step "construction cache mutation and publication fence" env \
+  HOME="$tmp_env_root/home" ELAN_HOME="$host_elan_home" \
+  BEAM_BIN_HOME="$tmp_env_root/bin" \
+  python3 tests/test-installation-cache.py "$BEAM_TEST_INSTALLATION"
 
 mcp_stdio_timeout="${BEAM_MCP_STDIO_TIMEOUT:-60}"
 mcp_stdio_env=()
@@ -62,16 +78,7 @@ run_step "MCP stdio stress" env ${mcp_stdio_env[@]+"${mcp_stdio_env[@]}"} \
     --restart-cycles 3 \
     --timeout "$mcp_stdio_timeout"
 
-run_step "bundle install" env BEAM_INSTALL_BUNDLE_DIR="$tmp_bundle_dir" \
-  ./.lake/build/bin/beam-cli bundle-install "$toolchain"
-
-if [ "$fixture_toolchain" != "$toolchain" ]; then
-  run_step "fixture bundle install" env BEAM_INSTALL_BUNDLE_DIR="$tmp_bundle_dir" \
-    ./.lake/build/bin/beam-cli bundle-install "$fixture_toolchain"
-fi
-
-run_step "MCP multi-toolchain workspaces" env \
-  BEAM_INSTALL_BUNDLE_DIR="$tmp_bundle_dir" \
+run_step "MCP multi-toolchain workspaces" \
   python3 tests/test-mcp-stdio.py \
     --scenario multi-toolchain-workspaces \
     --timeout "$mcp_stdio_timeout"

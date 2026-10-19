@@ -547,6 +547,33 @@ private def checkFailureResponseConversions : IO Unit := do
       require "response failure preserves progress metadata"
         (failure.fileProgress? == some progress)
 
+private def checkLakeHelperOutputCodec : IO Unit := do
+  let required := ["oleanPath", "ileanPath", "cPath", "tracePath"]
+  let optional := ["oleanServerPath", "oleanPrivatePath", "irPath", "irSigPath", "bcPath"]
+  let pathRoot := if System.Platform.isWindows then "C:\\fixture\\" else "/fixture/"
+  let path := fun field => pathRoot ++ field ++ " spaces λ \"quote\" \\slash"
+  for includeOptional in [false, true] do
+    let fields := required ++ if includeOptional then optional else []
+    let wire := Json.mkObj <| fields.map (fun field => (field, toJson (path field))) ++ [
+      ("root", toJson pathRoot), ("traceMetadata", Json.mkObj [("depHash", toJson ("retained" : String))]),
+      ("relPath", toJson ("Saved.lean" : String)), ("moduleName", toJson ("Saved" : String))
+    ]
+    let decoded ← IO.ofExcept <| fromJson? (α := LakeHelperSaveSpec) wire
+    require "helper specification preserves the flat golden wire shape"
+      ((toJson decoded).compress == wire.compress)
+    let broker : LeanSaveSpec := { toLakeHelperSaveSpec := decoded, helper := "/fixture/helper" }
+    let request := broker.toLakeHelperSaveSpec.toLakeHelperWriteTraceRequest
+    let again ← IO.ofExcept <| fromJson? (α := LakeHelperWriteTraceRequest) (toJson request)
+    require "helper to broker to writer preserves outputs" (again.toLeanSaveOutputs == decoded.toLeanSaveOutputs)
+    require "helper to broker to writer preserves trace metadata"
+      (again.traceMetadata.compress == decoded.traceMetadata.compress)
+    for field in fields do
+      require "path data preserves Unicode, quotes, backslashes and native spelling"
+        ((← IO.ofExcept <| (toJson again).getObjValAs? String field) == path field)
+    for field in optional do
+      require "optional fields have explicit absence semantics"
+        (((toJson again).getObjVal? field).isOk == includeOptional)
+
 private def checkLakeSaveTraceOutputs : IO Unit := do
   let temp ← IO.Process.output { cmd := "mktemp", args := #["-d"] }
   require "save trace fixture directory" (temp.exitCode == 0)
@@ -561,7 +588,7 @@ private def checkLakeSaveTraceOutputs : IO Unit := do
       IO.FS.writeFile path s!"artifact {path.fileName.getD ""}\n"
     let depTrace := Lake.BuildTrace.ofHash (Lake.Hash.ofNat 73) "save inputs"
     let trace := root / "Saved.trace"
-    let spec : LeanSaveSpec := {
+    let spec : LocalLeanSaveSpec := {
       relPath := "Saved.lean"
       moduleName := "Saved"
       oleanPath := olean
@@ -570,24 +597,23 @@ private def checkLakeSaveTraceOutputs : IO Unit := do
       irPath? := some ir
       irSigPath? := some irSig
       tracePath := trace
-      tracePlan := .inProcess depTrace
+      depTrace
     }
     let request : LakeHelperWriteTraceRequest := {
-      oleanPath := olean.toString
-      ileanPath := ilean.toString
-      cPath := c.toString
-      irPath? := some ir.toString
-      irSigPath? := some irSig.toString
-      tracePath := trace.toString
+      root := "/fixture"
+      oleanPath := olean
+      ileanPath := ilean
+      cPath := c
+      irPath? := some ir
+      irSigPath? := some irSig
+      tracePath := trace
       traceMetadata := toJson (Lake.BuildMetadata.ofBuild depTrace Json.null {})
     }
     for delegated in [false, true] do
       if delegated then
         lakeHelperWriteLeanSaveTrace request
       else
-        match ← writeLeanSaveTrace spec with
-        | .ok () => pure ()
-        | .error failure => throw <| IO.userError failure.message
+        writeLocalLeanSaveTrace spec
       let metadata ← IO.ofExcept <| Lake.BuildMetadata.parse (← IO.FS.readFile trace)
       require "save trace preserves dependency hash" (metadata.depHash == depTrace.hash)
       let some outputs := metadata.outputs?
@@ -605,9 +631,8 @@ private def checkLakeSaveTraceOutputs : IO Unit := do
       require "save trace includes current IR signature" (actual.compress == expected.compress)
       IO.FS.removeFile trace
     IO.FS.removeFile c
-    match ← writeLeanSaveTrace spec with
-    | .error _ => pure ()
-    | .ok () => throw <| IO.userError "missing C output did not reject save trace"
+    let rejected ← try writeLocalLeanSaveTrace spec *> pure false catch _ => pure true
+    require "missing C output rejects save trace" rejected
     require "missing C output must not publish trace" (!(← trace.pathExists))
   finally
     IO.FS.removeDirAll root
@@ -617,10 +642,11 @@ private def checkTypedLakeSaveTraceFailure : IO Unit := do
     System.FilePath.mk s!"/tmp/beam-missing-lake-helper-{← IO.monoNanosNow}"
   let unusedPath := System.FilePath.mk "/tmp/beam-unused-save-artifact"
   let request : LakeHelperWriteTraceRequest := {
-    oleanPath := unusedPath.toString
-    ileanPath := unusedPath.toString
-    cPath := unusedPath.toString
-    tracePath := unusedPath.toString
+    root := "/fixture"
+    oleanPath := unusedPath
+    ileanPath := unusedPath
+    cPath := unusedPath
+    tracePath := unusedPath
     traceMetadata := Json.null
   }
   let spec : LeanSaveSpec := {
@@ -630,7 +656,8 @@ private def checkTypedLakeSaveTraceFailure : IO Unit := do
     ileanPath := unusedPath
     cPath := unusedPath
     tracePath := unusedPath
-    tracePlan := .targetProcess missingHelper request.traceMetadata
+    helper := missingHelper
+    root := "/fixture", traceMetadata := request.traceMetadata
   }
   let expected ← runLakeHelperWriteSaveTrace missingHelper request
   let actual ← writeLeanSaveTrace spec
@@ -905,33 +932,12 @@ private def checkWorkspaceRoutingFields : IO Unit := do
       !#[Op.cancel, .initWorkspace, .dropWorkspace].contains op
     require s!"{op.key} has the wrong session policy" (op.usesSession == expectedSession)
 
-  let initWithLean : Request := {
-    payload := .initWorkspace {
-      root := "/workspace"
-      lean? := some { command := "lean", plugin := "/beam/libbeam.so" }
-    }
-  }
-  let initWithLeanJson := toJson initWithLean
-  requireJsonString "typed workspace init" "leanCmd" "lean" initWithLeanJson
-  requireJsonString "typed workspace init" "leanPlugin" "/beam/libbeam.so" initWithLeanJson
-  let decodedInitWithLean ← expectOk "typed workspace init round trip" <|
-    fromJson? (α := Request) initWithLeanJson
-  require "typed workspace init should preserve its flat wire shape"
-    (toJson decodedInitWithLean == initWithLeanJson)
-
-  for (label, field, value) in #[
-      ("command-only workspace init", "leanCmd", "lean"),
-      ("plugin-only workspace init", "leanPlugin", "/beam/libbeam.so")
-    ] do
+  for (field, value) in [("leanCmd", "lean"), ("leanPlugin", "/beam/libbeam.so")] do
     match fromJson? (α := Request) <| Json.mkObj [
-        ("op", toJson "init_workspace"),
-        ("root", toJson "/workspace"),
-        (field, toJson value)
-      ] with
-    | .ok _ => throw <| IO.userError s!"{label}: partial Lean configuration decoded"
-    | .error err =>
-        require s!"{label}: error should name both coupled fields"
-          (err.contains "leanCmd" && err.contains "leanPlugin")
+        ("op", toJson "init_workspace"), ("workspaceId", toJson "fixture"),
+        ("root", toJson "/workspace"), (field, toJson value)] with
+    | .ok _ => throw <| IO.userError "wire workspace initialization accepted component selection"
+    | .error err => require "rejected component field must be named" (err.contains field)
 
   let unscopedReq := Request.stats
   require "missing workspace id remains unscoped" unscopedReq.resolvedWorkspaceId?.isNone
@@ -1979,27 +1985,17 @@ private def checkBrokerConfigBoundary : IO Unit := do
   ]
   let root := System.FilePath.mk "/workspace"
   let plugin := System.FilePath.mk "/beam/libbeam.so"
-  let config ←
-    match BrokerConfig.ofOptions root (some "lean") (some plugin) with
-    | .ok config => pure config
-    | .error err => throw <| IO.userError s!"complete broker config failed: {err}"
+  let helper := System.FilePath.mk "/beam/bin/daemon"
+  let config := BrokerConfig.ofRuntime root {
+    command := "lean", plugin, daemonBin := helper
+    toolchain := "fixture", identity := ⟨"/beam", "fixture"⟩
+  }
   match config.lean? with
   | some leanConfig =>
-      require "broker config should preserve the Lean command" (leanConfig.command == "lean")
-      require "broker config should preserve the Lean plugin" (leanConfig.plugin == plugin)
-      require "broker CLI boundary should not invent a Lake helper" leanConfig.lakeHelper?.isNone
+      require "broker config preserves the Lean command" (leanConfig.command == "lean")
+      require "broker config preserves the Lean plugin" (leanConfig.plugin == plugin)
+      require "broker config requires the recorded helper" (leanConfig.lakeHelper == helper)
   | none => throw <| IO.userError "complete broker config lost the Lean backend"
-
-  let partialConfigs : Array (String × Option String × Option System.FilePath) := #[
-    ("command only", some "lean", none),
-    ("plugin only", none, some plugin)
-  ]
-  for (label, command?, plugin?) in partialConfigs do
-    match BrokerConfig.ofOptions root command? plugin? with
-    | .ok _ => throw <| IO.userError s!"partial broker config '{label}' was accepted"
-    | .error err =>
-        require s!"partial broker config '{label}' should explain the coupled fields"
-          (err.contains "command and plugin together")
 
 private def checkWrapperDaemonAuthorization : IO Unit := do
   let base := System.FilePath.mk s!"/tmp/beam-wrapper-daemon-authorization-{← IO.monoNanosNow}"
@@ -2052,6 +2048,7 @@ def main : IO Unit := do
   checkOrderedJsonPretty
   checkSyncFileResultDecode
   checkFailureResponseConversions
+  checkLakeHelperOutputCodec
   checkLakeSaveTraceOutputs
   checkTypedLakeSaveTraceFailure
   checkDocumentVersionMismatchErrorData

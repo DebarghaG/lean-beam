@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$repo_root/scripts/shared-lib.sh"
 . "$repo_root/scripts/install-lib.sh"
 # shellcheck source=scripts/install-locations.sh
@@ -35,6 +35,7 @@ current_root=""
 state_root=""
 install_bundles_root=""
 beam_cli="$repo_root/.lake/build/bin/beam-cli"
+construction_tool="$repo_root/.lake/build/bin/beam-install-runtime"
 installer_cmd="./scripts/install-beam.sh"
 install_codex_skills=0
 install_claude_skills=0
@@ -61,6 +62,7 @@ manual_mcp_targets=()
 approved_write_homes=()
 approved_write_home_count=0
 prepared_repo_toolchain=""
+prepared_frontend_prefix=""
 prepared_selected_toolchains=()
 prepared_custom_toolchains=()
 prepared_release_line_toolchains=()
@@ -136,18 +138,9 @@ set_opencode_config_dir "${OPENCODE_CONFIG_DIR:-$HOME/.config/opencode}"
 set_vibe_home "${VIBE_HOME:-$HOME/.vibe}"
 
 runtime_payload_spec=(
-  "required|rootFiles|Beam.lean|Beam.lean"
-  "required|rootFiles|lakefile.lean|lakefile.lean"
-  "required|rootFiles|lake-manifest.json|lake-manifest.json"
-  "required|rootFiles|lean-toolchain|lean-toolchain"
-  "required|rootFiles|validated-lean-toolchains|validated-lean-toolchains"
-  "required|rootFiles|compatible-lean-release-lines|compatible-lean-release-lines"
-  "generated|rootFiles|custom-lean-toolchains|custom-lean-toolchains"
-  "required|sourceDirs|Beam|Beam"
+  "required|rootFiles|LICENSE|LICENSE"
   "required|runtimePaths|.lake/build/bin/beam-cli|libexec/beam-cli"
-  "required|runtimePaths|.lake/build/bin/beam-daemon|libexec/beam-daemon"
   "required|runtimePaths|.lake/build/bin/lean-beam-mcp|libexec/lean-beam-mcp"
-  "required|runtimePaths|.lake/build/lib/$beam_lsp_plugin_shared_lib|libexec/$beam_lsp_plugin_shared_lib"
   "required|wrapperPaths|scripts/lean-beam|bin/lean-beam"
   "required|wrapperPaths|scripts/lean-beam-search|bin/lean-beam-search"
   "required|wrapperPaths|scripts/lean-beam-mcp|bin/lean-beam-mcp"
@@ -484,6 +477,9 @@ ensure_beam_symlink_or_absent() {
   local root="$2"
   local label="$3"
   local target=""
+  local parent=""
+  local suffix=""
+  local canonical_root=""
   require_path_within "$path" "$root" "$label"
   if [ ! -e "$path" ] && [ ! -L "$path" ]; then
     return 0
@@ -495,7 +491,18 @@ ensure_beam_symlink_or_absent() {
     die "refusing to replace non-Beam path at $path"
   fi
   target="$(symlink_target_text "$path")"
-  require_path_within "$target" "$install_root" "$label target"
+  # Resolve directory aliases before checking ownership (for example macOS's
+  # /tmp -> /private/tmp). Missing members remain repairable, including a
+  # wrapper through a missing current generation. This checks ownership for
+  # replacing a launcher, not admission to execute the damaged installation.
+  parent="$target"
+  while [ ! -d "$parent" ]; do
+    suffix="/$(basename "$parent")$suffix"
+    parent="$(dirname "$parent")"
+  done
+  target="$(cd -P "$parent" && printf '%s%s\n' "$(pwd)" "$suffix")" || return 1
+  canonical_root="$(cd -P "$install_root" && pwd)" || return 1
+  require_path_within "$target" "$canonical_root" "$label target"
 }
 
 remove_owned_staging_dir() {
@@ -542,6 +549,8 @@ replace_symlink_atomically() {
   local link_dir=""
   local tmp_dir=""
   local tmp_link=""
+  local no_follow="-T"
+  local status=0
   require_absolute_path "$target" "$label target"
   ensure_beam_symlink_or_absent "$link_path" "$allowed_root" "$label"
   link_dir="$(dirname "$link_path")"
@@ -552,9 +561,19 @@ replace_symlink_atomically() {
   require_path_within "$tmp_dir" "$link_dir" "$label temp dir"
   tmp_link="$tmp_dir/link"
   ln -s "$target" "$tmp_link"
-  rm -f -- "$link_path"
-  mv "$tmp_link" "$link_path"
+  # The temporary link is on the same filesystem. Replace the directory entry
+  # with one rename; ordinary mv follows an existing link to a directory.
+  case "$(uname -s)" in
+    Darwin) no_follow="-h" ;;
+  esac
+  if mv -f "$no_follow" "$tmp_link" "$link_path"; then
+    :
+  else
+    status=$?
+    rm -f -- "$tmp_link"
+  fi
   rmdir "$tmp_dir"
+  return "$status"
 }
 
 verify_publish_targets() {
@@ -1025,6 +1044,7 @@ resolve_prepared_toolchain_selection() {
 
 runtime_artifacts_ready() {
   [ -x "$beam_cli" ] \
+    && [ -x "$construction_tool" ] \
     && [ -x "$repo_root/.lake/build/bin/beam-daemon" ] \
     && [ -x "$repo_root/.lake/build/bin/lean-beam-mcp" ] \
     && [ -f "$repo_root/.lake/build/lib/$beam_lsp_plugin_shared_lib" ]
@@ -1095,27 +1115,6 @@ print_install_plan() {
   fi
 }
 
-hash_runtime_payload() {
-  local root="$1"
-  local tool
-  tool="$(hash_tool)"
-  if [ "$tool" = "sha256sum" ]; then
-    (
-      cd "$root"
-      find . -type f ! -path './manifest.json' -print | LC_ALL=C sort | while IFS= read -r rel; do
-        sha256sum "$rel"
-      done | sha256sum | awk '{print $1}'
-    )
-  else
-    (
-      cd "$root"
-      find . -type f ! -path './manifest.json' -print | LC_ALL=C sort | while IFS= read -r rel; do
-        shasum -a 256 "$rel"
-      done | shasum -a 256 | awk '{print $1}'
-    )
-  fi
-}
-
 validate_runtime_payload_layout() {
   local root="$1"
   local entry=""
@@ -1126,11 +1125,6 @@ validate_runtime_payload_layout() {
     IFS='|' read -r _ category _ dest_rel <<< "$entry"
     path="$root/$dest_rel"
     case "$category" in
-      sourceDirs)
-        if [ -L "$path" ] || [ ! -d "$path" ]; then
-          die "installed runtime is missing required source directory: $path"
-        fi
-        ;;
       rootFiles|runtimePaths|wrapperPaths)
         if [ -L "$path" ] || [ ! -f "$path" ]; then
           die "installed runtime is missing required regular file: $path"
@@ -1141,7 +1135,7 @@ validate_runtime_payload_layout() {
         ;;
     esac
     case "$dest_rel" in
-      libexec/beam-cli|libexec/beam-daemon|libexec/lean-beam-mcp|bin/lean-beam|bin/lean-beam-search|bin/lean-beam-mcp)
+      libexec/beam-cli|libexec/lean-beam-mcp|bin/lean-beam|bin/lean-beam-search|bin/lean-beam-mcp)
         if [ ! -x "$path" ]; then
           die "installed runtime has a non-executable command: $path"
         fi
@@ -1156,22 +1150,25 @@ validate_runtime_payload_layout() {
 validate_runtime_version_for_reuse() {
   local version_root="$1"
   local expected_payload_id="$2"
-  local actual_payload_id=""
   require_path_within "$version_root" "$versions_root" "installed runtime version"
-  "$beam_cli" install-runtime-validate "$version_root"
   validate_runtime_payload_layout "$version_root"
-  actual_payload_id="$(hash_runtime_payload "$version_root")"
-  if [ "$actual_payload_id" != "$expected_payload_id" ]; then
-    die "refusing to reuse installed Beam runtime whose contents do not match its payload hash: $version_root; stop active Beam clients, move this exact runtime aside for inspection, and rerun the installer"
+  "$construction_tool" verify-installed "$version_root"
+  if [ "$(basename "$version_root")" != "$expected_payload_id" ]; then
+    die "installed runtime directory does not match its generation"
   fi
 }
 
 ensure_runtime_artifacts() {
   confirm_path_edit "build Beam runtime artifacts in the source checkout" "$repo_root/.lake/build"
   echo "building beam runtime artifacts" >&2
+  prepared_frontend_prefix="$(env -u LEAN_SYSROOT elan run --install "$prepared_repo_toolchain" lean --print-prefix)"
+  prepared_frontend_prefix="$(cd -P "$prepared_frontend_prefix" && pwd)"
   (
     cd "$repo_root"
-    lake build Beam.LSP:shared beam-cli beam-daemon lean-beam-mcp
+    env -u LAKE_HOME -u LEAN_PATH -u LEAN_SRC_PATH -u LEAN_CC -u LEAN_AR -u LEAN_ABORT_ON_PANIC \
+      LEAN="$prepared_frontend_prefix/bin/lean" LEAN_SYSROOT="$prepared_frontend_prefix" \
+      "$prepared_frontend_prefix/bin/lake" build \
+      Beam.LSP:shared beam-cli beam-daemon lean-beam-mcp beam-install-runtime
   )
   if ! runtime_artifacts_ready; then
     die "Beam runtime build completed but required artifacts are missing"
@@ -1230,52 +1227,6 @@ stage_runtime_tree() {
         ;;
     esac
   done
-}
-
-write_install_manifest() {
-  local dest="$1"
-  local payload_id="$2"
-  local source_commit="$3"
-  local source_commit_arg="-"
-  shift 3
-  if [ -n "$source_commit" ]; then
-    source_commit_arg="$source_commit"
-  fi
-  "$beam_cli" install-manifest "$payload_id" "$source_commit_arg" "$@" >"$dest"
-}
-
-refresh_reused_install_manifest() {
-  local staging_root="$1"
-  local version_root="$2"
-  local source_commit="$3"
-  local staged_manifest="$staging_root/manifest.json"
-  local installed_manifest="$version_root/manifest.json"
-  local source_commit_arg="-"
-  require_owned_staging_dir "$staging_root"
-  require_path_within "$version_root" "$versions_root" "installed runtime version"
-  if [ -L "$staged_manifest" ] || [ ! -f "$staged_manifest" ]; then
-    die "staged runtime manifest must be a regular non-symlinked file: $staged_manifest"
-  fi
-  if [ -L "$installed_manifest" ] || [ ! -f "$installed_manifest" ]; then
-    die "installed runtime manifest must be a regular non-symlinked file: $installed_manifest"
-  fi
-  if [ -n "$source_commit" ]; then
-    source_commit_arg="$source_commit"
-  fi
-  "$beam_cli" install-manifest-with-source-commit \
-    "$installed_manifest" "$source_commit_arg" >"$staged_manifest"
-  confirm_path_edit "refresh reused runtime provenance" "$installed_manifest"
-  mv "$staged_manifest" "$installed_manifest"
-}
-
-prebuild_bundle() {
-  local runtime_home="$1"
-  local toolchain="$2"
-  local bundle_home="$3"
-  ensure_dir_for_install "$bundle_home" "install bundle cache"
-  confirm_path_edit "prebuild Beam bundle" "$bundle_home" "$toolchain"
-  BEAM_HOME="$runtime_home" BEAM_INSTALL_BUNDLE_DIR="$bundle_home" \
-    "$runtime_home/libexec/beam-cli" bundle-install "$toolchain"
 }
 
 ensure_skill_target_replaceable() {
@@ -1378,35 +1329,30 @@ prepare_install_environment() {
 
 prepare_install_version() {
   local staging_root="$1"
+  local source_commit_arg="-"
   stage_runtime_tree "$staging_root"
-  prepared_payload_id="$(hash_runtime_payload "$staging_root")"
-  prepared_version_root="$versions_root/$prepared_payload_id"
   prepared_source_commit="$(repo_source_commit)"
-  write_install_manifest \
-    "$staging_root/manifest.json" \
-    "$prepared_payload_id" \
-    "$prepared_source_commit" \
-    ${prepared_selected_toolchains[@]+"${prepared_selected_toolchains[@]}"}
+  if [ -n "$prepared_source_commit" ]; then
+    source_commit_arg="$prepared_source_commit"
+  fi
+  ensure_dir_for_install "$install_bundles_root" "construction build cache"
+  confirm_path_edit "construct complete target runtimes in staging" "$staging_root" "$install_bundles_root"
+  prepared_payload_id="$("$construction_tool" construct "$repo_root" "$prepared_frontend_prefix" "$staging_root" "$install_bundles_root" \
+    "$source_commit_arg" ${prepared_selected_toolchains[@]+"${prepared_selected_toolchains[@]}"})"
+  if [[ ! "$prepared_payload_id" =~ ^[0-9a-f]{64}$ ]]; then
+    die "construction tool did not return an installation generation"
+  fi
+  prepared_version_root="$versions_root/$prepared_payload_id"
   if [ -d "$prepared_version_root" ]; then
     validate_runtime_version_for_reuse "$prepared_version_root" "$prepared_payload_id"
-    refresh_reused_install_manifest \
-      "$staging_root" "$prepared_version_root" "$prepared_source_commit"
-    validate_runtime_version_for_reuse "$prepared_version_root" "$prepared_payload_id"
+    if ! cmp -s "$staging_root/manifest.json" "$prepared_version_root/manifest.json"; then
+      die "existing installation generation has a different manifest"
+    fi
     remove_owned_staging_dir "$staging_root"
     return 0
   fi
   move_staging_dir_into_versions "$staging_root" "$prepared_version_root"
   validate_runtime_version_for_reuse "$prepared_version_root" "$prepared_payload_id"
-}
-
-prebuild_install_bundles() {
-  local version_root="$1"
-  shift
-  local toolchain=""
-  for toolchain in "$@"; do
-    echo "prebuilding beam bundle for $toolchain" >&2
-    prebuild_bundle "$version_root" "$toolchain" "$install_bundles_root"
-  done
 }
 
 publish_runtime() {
@@ -1663,7 +1609,6 @@ main() {
   active_staging_root=""
   trap 'release_install_lock' EXIT
 
-  prebuild_install_bundles "$prepared_version_root" ${prepared_selected_toolchains[@]+"${prepared_selected_toolchains[@]}"}
   publish_runtime "$prepared_version_root"
   register_requested_mcp_servers
   install_requested_skills
@@ -1672,4 +1617,6 @@ main() {
   trap - EXIT
 }
 
-main "$@"
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+fi

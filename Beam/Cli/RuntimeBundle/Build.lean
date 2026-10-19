@@ -81,7 +81,7 @@ private def prepareNonstandardLakeHome
     (bundleDir leanPrefix libDir : System.FilePath) : IO System.FilePath := do
   if System.Platform.isWindows then
     throw <| IO.userError
-      "nonstandard Lean libdir toolchains are not supported by the local bundle fallback on Windows"
+      "nonstandard Lean libdir toolchains are not supported by the standalone runtime construction on Windows"
   let lakeHome := bundleDir / "lake-home"
   let buildDir := lakeHome / ".lake" / "build"
   let binDir := buildDir / "bin"
@@ -110,14 +110,21 @@ private structure LakeInvocation where
   args : Array String
   env : Array (String × Option String) := #[]
 
-private def lakeInvocationFor (bundleDir : System.FilePath) (toolchain : String)
+private def lakeInvocationFor (bundleDir : System.FilePath)
     (fingerprint : ToolchainFingerprint) :
     IO LakeInvocation := do
-  let default := {
-    cmd := "elan",
-    args := #["run", toolchain, "lake"]
-  }
   let leanPrefix := System.FilePath.mk fingerprint.leanPrefix
+  let exe := if System.Platform.isWindows then ".exe" else ""
+  let cleanEnv : Array (String × Option String) := #[
+    ("LEAN_PATH", none), ("LEAN_SRC_PATH", none),
+    ("LEAN_CC", none), ("LEAN_AR", none), ("LEAN_ABORT_ON_PANIC", none)
+  ]
+  let default : LakeInvocation := {
+    cmd := (leanPrefix / "bin" / ("lake" ++ exe)).toString
+    args := #[]
+    env := #[("LEAN", some (leanPrefix / "bin" / ("lean" ++ exe)).toString),
+      ("LEAN_SYSROOT", some leanPrefix.toString), ("LAKE_HOME", none)] ++ cleanEnv
+  }
   let libDir := System.FilePath.mk fingerprint.leanLibDir
   let standardLibDir := leanPrefix / "lib" / "lean"
   if ← samePath libDir standardLibDir then
@@ -129,18 +136,36 @@ private def lakeInvocationFor (bundleDir : System.FilePath) (toolchain : String)
       args := #[]
       env := #[
         ("LAKE_HOME", some lakeHome.toString),
-        ("LEAN", some (leanPrefix / "bin" / "lean").toString)
-      ]
+        ("LEAN", some (leanPrefix / "bin" / "lean").toString),
+        ("LEAN_SYSROOT", none)
+      ] ++ cleanEnv
     }
 
-private def fallbackBuildFailureMessage (toolchain : String) (cacheRoot bundleDir : System.FilePath)
+/-- Query construction inputs from the selected Lake SDK, without scanning its library directory. -/
+def buildSharedRuntimePaths (bundleDir workspace : System.FilePath)
+    (fingerprint : ToolchainFingerprint) : IO (Array String) := do
+  let lake ← lakeInvocationFor bundleDir fingerprint
+  let output ← IO.Process.output {
+    cmd := lake.cmd
+    args := lake.args ++ #["script", "run", "beamSharedRuntimeFiles"]
+    env := lake.env
+    cwd := workspace.toString
+  }
+  unless output.exitCode == 0 do
+    throw <| IO.userError s!"selected Lake could not report its shared-runtime inputs: {output.stderr}"
+  let paths ← IO.ofExcept <| (Json.parse output.stdout >>= fromJson? (α := Array String)).mapError IO.userError
+  unless validSharedRuntimePaths paths do
+    throw <| IO.userError "selected Lake reported invalid shared-runtime inputs"
+  pure paths
+
+private def constructionBuildFailureMessage (toolchain : String) (cacheRoot bundleDir : System.FilePath)
     (stdout stderr : String) : String :=
   String.intercalate "\n" [
-    s!"failed to build local beam fallback bundle for toolchain {toolchain}",
-    s!"install bundle cache did not provide a matching bundle; attempted local fallback under {cacheRoot}",
+    s!"failed to construct Beam runtime for toolchain {toolchain}",
+    s!"construction cache directory: {cacheRoot}",
     s!"bundle workspace: {bundleWorkspaceFor bundleDir}",
-    "this fallback path runs `lake build` and may need network access on a cold machine if dependencies have not been fetched yet",
-    "if you want to avoid that at runtime, prebuild the installed bundle for the accepted toolchain first",
+    "installation runs `lake build` and may need network access on a cold machine",
+    "normal Beam execution never constructs missing targets",
     "",
     "lake stdout:",
     if stdout.trimAscii.isEmpty then "(empty)" else stdout,
@@ -194,16 +219,15 @@ private def qualifyToolchainBundle
       bundleQualificationFailureMessage toolchain workspace probe out.stdout out.stderr
   IO.FS.removeDirAll qualificationDir
 
-def buildToolchainBundle (home : System.FilePath) (toolchain srcHash : String)
+private def buildToolchainBundle (hashes : ConstructionHash.Context) (home : System.FilePath) (toolchain srcHash : String)
     (fingerprint : ToolchainFingerprint)
-    (cacheRoot bundleDir workspace : System.FilePath) : IO Unit := do
-  ensureElan
+    (cacheRoot bundleDir workspace : System.FilePath) : IO VerifiedBundle := do
   let metadata := bundleMetadataPath bundleDir
   if ← metadata.pathExists then
     IO.FS.removeFile metadata
   syncBundleWorkspace home bundleDir workspace
   IO.eprintln s!"building beam bundle for {toolchain}"
-  let lake ← lakeInvocationFor bundleDir toolchain fingerprint
+  let lake ← lakeInvocationFor bundleDir fingerprint
   let out ← IO.Process.output {
     cmd := lake.cmd
     args := lake.args ++ #["build", "Beam.LSP:shared", "beam-daemon"]
@@ -211,77 +235,26 @@ def buildToolchainBundle (home : System.FilePath) (toolchain srcHash : String)
     cwd := workspace.toString
   }
   if out.exitCode != 0 then
-    throw <| IO.userError <| fallbackBuildFailureMessage toolchain cacheRoot bundleDir out.stdout out.stderr
+    throw <| IO.userError <| constructionBuildFailureMessage toolchain cacheRoot bundleDir out.stdout out.stderr
+  let sharedLibraries ← buildSharedRuntimePaths bundleDir workspace fingerprint
+  let artifacts ← snapshotBundleArtifacts hashes workspace sharedLibraries
   qualifyToolchainBundle bundleDir workspace toolchain lake
-  writeBundleMetadata bundleDir toolchain srcHash fingerprint workspace
+  writeBundleMetadata hashes bundleDir toolchain srcHash fingerprint workspace sharedLibraries artifacts
 
-def existingToolchainBundleForFingerprint? (cacheRoot home : System.FilePath) (toolchain : String)
-    (fingerprint : ToolchainFingerprint) : IO (Option (LeanBundlePaths × String)) := do
-  let (bundleDir, bundleId, srcHash) ← bundleDirForFingerprint cacheRoot home toolchain fingerprint
-  let workspace := bundleWorkspaceFor bundleDir
-  if ← bundleReady bundleDir toolchain srcHash fingerprint then
-    pure <| some (leanBundlePathsFor workspace, bundleId)
-  else
-    pure none
-
-def existingToolchainBundle? (cacheRoot home : System.FilePath) (toolchain : String) :
-    IO (Option (LeanBundlePaths × String)) := do
-  let fingerprint ← toolchainFingerprint toolchain
-  existingToolchainBundleForFingerprint? cacheRoot home toolchain fingerprint
-
-partial def existingToolchainBundleInAnyForFingerprint? (cacheRoots : List System.FilePath)
-    (home : System.FilePath) (toolchain : String) (fingerprint : ToolchainFingerprint) :
-    IO (Option (LeanBundlePaths × String)) := do
-  match cacheRoots with
-  | [] => pure none
-  | cacheRoot :: rest =>
-      match ← existingToolchainBundleForFingerprint? cacheRoot home toolchain fingerprint with
-      | some bundle => pure <| some bundle
-      | none => existingToolchainBundleInAnyForFingerprint? rest home toolchain fingerprint
-
-partial def existingToolchainBundleInAny? (cacheRoots : List System.FilePath) (home : System.FilePath)
-    (toolchain : String) : IO (Option (LeanBundlePaths × String)) := do
-  match cacheRoots with
-  | [] => pure none
-  | _ =>
-      let fingerprint ← toolchainFingerprint toolchain
-      existingToolchainBundleInAnyForFingerprint? cacheRoots home toolchain fingerprint
-
-def ensureToolchainBundleInForFingerprint (cacheRoot home : System.FilePath) (toolchain : String)
-    (fingerprint : ToolchainFingerprint) : IO (LeanBundlePaths × String) := do
-  let (bundleDir, bundleId, srcHash) ← bundleDirForFingerprint cacheRoot home toolchain fingerprint
+/-- Obtain one verified target from captured construction inputs, building only on a cache miss. -/
+def obtainVerifiedTarget (hashes : ConstructionHash.Context) (inputs : ConstructionInputs)
+    (cacheRoot home : System.FilePath) (toolchain : String)
+    (fingerprint : ToolchainFingerprint) : IO VerifiedBundle := do
+  let (bundleDir, bundleId) := bundleDirForFingerprint cacheRoot inputs toolchain fingerprint
+  let srcHash := inputs.sourceHash
   let workspace := bundleWorkspaceFor bundleDir
   let some platformRoot := bundleDir.parent
     | throw <| IO.userError s!"bundle directory has no platform root: {bundleDir}"
   withLock (bundleBuildLockPath platformRoot bundleId) do
-    unless ← bundleReady bundleDir toolchain srcHash fingerprint do
-      buildToolchainBundle home toolchain srcHash fingerprint cacheRoot bundleDir workspace
-  pure (leanBundlePathsFor workspace, bundleId)
-
-def ensureToolchainBundleIn (cacheRoot home : System.FilePath) (toolchain : String) :
-    IO (LeanBundlePaths × String) := do
-  ensureAcceptedLeanToolchain home toolchain
-  let fingerprint ← toolchainFingerprint toolchain
-  ensureToolchainBundleInForFingerprint cacheRoot home toolchain fingerprint
-
-def ensureToolchainBundle (root home : System.FilePath) (toolchain : String) :
-    IO (LeanBundlePaths × String) := do
-  ensureAcceptedLeanToolchain home toolchain
-  let fingerprint ← toolchainFingerprint toolchain
-  match ← existingToolchainBundleInAnyForFingerprint? (← installBundleCacheRoots) home toolchain fingerprint with
-  | some bundle => pure bundle
-  | none =>
-      let cacheRoot ← runtimeBundleCacheRootForWrite root
-      ensureToolchainBundleInForFingerprint cacheRoot home toolchain fingerprint
-
-def predictedToolchainBundleForFingerprint (cacheRoot home : System.FilePath) (toolchain : String)
-    (fingerprint : ToolchainFingerprint) : IO (LeanBundlePaths × String) := do
-  let (bundleDir, bundleId, _) ← bundleDirForFingerprint cacheRoot home toolchain fingerprint
-  pure (leanBundlePathsFor (bundleWorkspaceFor bundleDir), bundleId)
-
-def predictedToolchainBundle (cacheRoot home : System.FilePath) (toolchain : String) :
-    IO (LeanBundlePaths × String) := do
-  let fingerprint ← toolchainFingerprint toolchain
-  predictedToolchainBundleForFingerprint cacheRoot home toolchain fingerprint
+    match ← readVerifiedTarget hashes bundleDir toolchain srcHash fingerprint with
+    | .ok (some bundle) => pure bundle
+    | .ok none => buildToolchainBundle hashes home toolchain srcHash fingerprint cacheRoot bundleDir workspace
+    | .error failure =>
+        throw <| IO.userError s!"construction cache failed verification: {bundleDir}: {failure.message}; preserve or replace this cache entry before retrying installation"
 
 end Beam.Cli

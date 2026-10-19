@@ -206,7 +206,7 @@ The executable path is split into importable modules:
 
 - [Beam/Mcp/Protocol.lean](../Beam/Mcp/Protocol.lean): current MCP JSON-RPC helpers
 - [Beam/Mcp/Options.lean](../Beam/Mcp/Options.lean): executable options and usage
-- [Beam/Mcp/Runtime.lean](../Beam/Mcp/Runtime.lean): canonical root to broker configuration
+- [Beam/Mcp/Application.lean](../Beam/Mcp/Application.lean): installation-owned runtime admission
 - [Beam/Mcp/SelfCheck.lean](../Beam/Mcp/SelfCheck.lean): installed-wrapper self-check
 - [Beam/Mcp/Server.lean](../Beam/Mcp/Server.lean): descriptor resolution, lazy runtime dispatch, and
   the synchronous protocol-test seam
@@ -230,10 +230,11 @@ Keep these stdio invariants explicit:
 - JSON-RPC envelopes and current-method parameter objects reject undeclared fields; protocol
   extensions belong in `_meta` or in a deliberately versioned schema change
 
-The installed wrapper passes the matching `beam-cli`; on lazy first use, `Beam.Mcp.Runtime` obtains
-one Lean command/plugin/helper runtime from `beam-cli --root <root> mcp-config`. Keep bundle
-selection in that narrow boundary: do not accept either explicit runtime flag alone or mix bundle
-artifacts. Clients supply descriptors, not raw commands or plugin paths.
+Both application adapters obtain `Beam.Runtime.Description` through exact local installation
+membership lookup. The owner retains the description while execution receives only admitted paths.
+Creation and reuse never provision targets. Reuse checks the retained binding before dispatch;
+drop clears it without resolving the current installation.
+Clients supply descriptors, not raw commands or plugin paths.
 
 When adding an MCP-facing operation:
 
@@ -381,6 +382,35 @@ timeout, or notification-write failure terminates and reaps that child before th
 only a fully initialized session enters workspace state. Keep this acquisition bracket intact so
 runtime closure never has to discover an unowned provisional process.
 
+Target-built Lake helpers evaluate project configuration outside the frontend's Lean runtime.
+Each helper request owns one child, a 30-second monotonic deadline, and the broker request's
+cancellation flag. Request and response JSON use a private temporary directory with bounded
+message size; project stdout/stderr do not carry protocol data. A completed response is published
+atomically before the owner terminates and reaps the helper. Cancellation and deadline failure
+also terminate and reap it before returning a typed broker failure.
+
+The helper waits for an owner handshake before binding its installation or evaluating project
+code. One process-job scope owns assignment, observation, termination, and the final child wait.
+Its caller receives an observation capability rather than maintaining a separate ownership flag.
+Observation and teardown are serialized: loss of child ownership is permanent, and a capability
+retained past teardown rejects observation before touching the old PID. The caller must not wait
+or kill the raw child separately. Native failures retain their OS error code in `IO.Error`.
+Windows assigns
+a non-inheritable kill-on-close Job Object before the handshake; successful job closure requests
+termination of its members, so cleanup waits on the retained child handle without another kill. Failed
+assignment or closure still requires explicit leader termination and waiting. On POSIX
+the helper owns a new session/process group and watches its owner's stdin lease, terminating its
+group on owner loss. The parent observes exit without reaping until it has signalled the retained
+leader and its group. Cleanup terminates the retained leader before its group because cancellation
+can arrive before the child reaches `setsid`. On Darwin, signalling a group whose members are
+already exiting can return `EPERM` before those members become zombies. Cleanup accepts this only
+after a complete kernel query confirms every member is a zombie or has the kernel's `P_WEXIT`
+exit flag. An uncertain or failed query preserves the error. Do not substitute
+`Child.tryWait` followed by a PID signal. These mechanisms clean up ordinary
+descendants; POSIX process groups do not contain descendants that deliberately escape their
+session/group. OS process creation and termination are not hard real-time bounds; CI retains its
+external watchdog.
+
 The thick part of the broker is request orchestration. For `sync`, `runAt`, `goals`, `runWith`,
 `release`, and `save`, the broker reads the source file, updates the LSP document mirror, waits for
 the relevant diagnostics/progress barrier when needed, asks the backend for semantic facts, and
@@ -440,9 +470,17 @@ workspace binding. Exactly one foreground `lean-beam serve` process owns the gen
 starts the daemon in a dedicated process session, passes the identity, effective configuration
 hash, and random capability through piped stdin, and retains the pipe's write end. Before creating
 the lock or descriptor, Beam creates a missing control leaf with mode `0700`, or validates that an
-existing leaf is a real, non-symlinked directory already using mode `0700`. It never changes an
-existing selection's permissions. The mode-`0600` descriptor is written through an exclusive
-random temporary path and publishes `live` or `draining`; descriptor reads and in-place lifecycle
+existing leaf is a real, non-symlinked directory already using mode `0700`. Creation supplies the
+permissions in the OS call, so concurrent creators cannot observe a temporarily public leaf. On
+Windows, one exact-leaf handle supplies both attributes and DACL information; the directory must
+belong to the current user and have an allow-only DACL granting that user full access. Only SYSTEM
+and Administrators may have additional grants. Deny, object and callback entries are rejected
+rather than approximating their effective access. Link, permission and inspection failures remain
+distinct; Beam never changes an existing selection's permissions. Incident directories use the
+same private creation operation without creating parents, so cleanup cannot recreate a deleted
+control directory or project. `tests/test-system-contracts.py` exercises these native contracts in
+both the fast suite and selected-SDK qualification. The mode-`0600` descriptor is written through an
+exclusive random temporary path and publishes `live` or `draining`; descriptor reads and in-place lifecycle
 updates reject a symbolic-link or non-file descriptor leaf. Every wrapper request, including
 cancellation, generation probes, and shutdown, first verifies the selected generation through the
 daemon's bounded same-connection identity greeting and then presents the capability. The greeting
@@ -499,7 +537,11 @@ handle; after abrupt owner death, the daemon closes cooperatively on owner-pipe 
 independent supervisor imposing that same hard bound. Once
 the operator establishes that the old session is no longer authoritative,
 `lean-beam --root ROOT recover --generation ID` quarantines that exact descriptor without signalling
-any recorded process. Opaque legacy, unsupported, or malformed state requires `recover --force`.
+any recorded process. Installation control admission runs before endpoint probes or registry
+mutation and compares the recorded daemon path with the invoking executable’s concrete installation
+root. It does not read current provenance, resolve the project selector, or require a working plugin.
+Independent installations cannot stop or recover each other’s owners. Opaque or malformed state
+cannot establish ownership and remains fenced for explicit operator archival after its owner stops.
 A paused holder keeps its pipe open and remains valid without expiry. If the project root
 disappears, cleanup uses the already resolved control path without recreating the project.
 
@@ -572,8 +614,11 @@ locks intentionally keep the lower-level unbounded helper because another proces
 be compiling a helper bundle. The shell installer's `.install-lock` remains an atomic directory
 compatibility boundary: it is never stale-reaped, and a crashed installer requires explicit
 operator recovery. Reusable CLI argument parsing lives in
-[Beam/Cli/Args.lean](../Beam/Cli/Args.lean). Project-root inference
-and Lean toolchain lookup live in [Beam/Cli/Project.lean](../Beam/Cli/Project.lean).
+[Beam/Cli/Args.lean](../Beam/Cli/Args.lean). Project-root inference lives in
+[Beam/Cli/Project.lean](../Beam/Cli/Project.lean). The application adapter in
+[Beam/Installation/Lookup.lean](../Beam/Installation/Lookup.lean) selects standalone or SDK (bundled with a complete Lean installation) membership lookup.
+Construction records and bundled build assertions live in
+[Beam/Installation/Bundled.lean](../Beam/Installation/Bundled.lean).
 Shared filesystem path helpers live in [Beam/Path.lean](../Beam/Path.lean). Use them instead of
 copying string-prefix checks or raw `IO.FS.realPath` wrappers:
 
@@ -603,9 +648,12 @@ explicit owner lifetime, OS-assigned endpoint readiness, and explicit non-signal
 [Beam/Cli/DaemonManager.lean](../Beam/Cli/DaemonManager.lean). Broker request plumbing,
 progress messages, connection-owned cancellation-on-interrupt, and response failure notes live in
 [Beam/Cli/Broker.lean](../Beam/Cli/Broker.lean). User-facing stdout/stderr formatting helpers live
-in [Beam/Cli/Output.lean](../Beam/Cli/Output.lean). Doctor, validated/compatible toolchain registry,
-install layout/manifest, and MCP config reporting live in
-[Beam/Cli/Info.lean](../Beam/Cli/Info.lean). The command dispatch
+in [Beam/Cli/Output.lean](../Beam/Cli/Output.lean). Version and doctor reporting live in
+[Beam/Cli/Info.lean](../Beam/Cli/Info.lean), with runtime inspection supplied by the installation
+adapter. The non-shipped construction and verification commands live in
+[Beam/InstallMain.lean](../Beam/InstallMain.lean). Identity data and rendering in
+[Beam/Version.lean](../Beam/Version.lean) are pure; installation metadata is admitted in
+[Beam/Installation/Lookup.lean](../Beam/Installation/Lookup.lean). The command dispatch
 table lives in [Beam/Cli/Commands.lean](../Beam/Cli/Commands.lean), and [Beam/Cli/Usage.lean](../Beam/Cli/Usage.lean)
 owns the help text. Lean command to broker-request projection lives in
 [Beam/Cli/LeanOperation.lean](../Beam/Cli/LeanOperation.lean). Install and bundle layout metadata,
@@ -615,18 +663,37 @@ installed-state planning and removal lives in
 [Beam/Cli/InstallPrune.lean](../Beam/Cli/InstallPrune.lean). Runtime bundle compatibility imports
 live in [Beam/Cli/RuntimeBundle.lean](../Beam/Cli/RuntimeBundle.lean); implementation details are
 split under [Beam/Cli/RuntimeBundle](../Beam/Cli/RuntimeBundle). Keep source hashing, resolved
-toolchain fingerprinting, metadata acceptance, and fallback bundle builds in their focused
-submodules instead of growing the umbrella import. Bundle IDs and metadata must include both the
+toolchain fingerprinting, metadata acceptance, and construction builds in their focused
+submodules instead of growing the umbrella import. These modules serve the source-side installer;
+normal execution performs exact installation membership lookup and never builds a runtime.
+Construction-cache IDs and metadata include both the
 Beam runtime source hash and the resolved Lean/Lake fingerprint so local custom toolchain relinks
 and reported identity changes cannot silently reuse stale helpers. The user-facing model is in
 [CUSTOM_TOOLCHAINS.md](CUSTOM_TOOLCHAINS.md).
 
-Install manifests describe required staged artifacts, not optional future layout. New manifests
-write schema 3 and name creation-time toolchain provenance explicitly. Schema 2 remains readable for
-identity and `lean-beam prune`, but installer reuse requires the current schema; the compatibility
-window and removal trigger live in [COMPATIBILITY.md](COMPATIBILITY.md).
+The Lake `beamSharedRuntime` target stages the selected SDK's declared Lean/Lake shared dependencies
+atomically and supplies executable link settings. The `beamSharedRuntimeFiles` source-side script
+reports those relative build inputs to construction. Cached target metadata retains that list and
+requires every recorded library before reuse. Construction copies each compiler's libraries into
+its own loader layout and includes their bytes in the single installed artifact inventory.
+
+[Beam/Cli/InstallConstruction.lean](../Beam/Cli/InstallConstruction.lean) builds and qualifies selected
+runtimes, copies their artifacts into staging, and finalizes the standalone manifest. The
+`beam-install-runtime` executable is a source-side construction tool; it is not installed. Its
+`construct SOURCE FRONTEND-SDK STAGING BUILD-CACHE SOURCE-COMMIT|- TARGET...` command prints only the completed generation
+on stdout. Its `verify ROOT` command validates the complete recorded payload without rewriting it.
+`verify-installed ROOT` additionally validates the immutable installed layout for reuse; `layout`
+prints the construction layout as JSON. These commands are not part of the installed CLI.
+The installer captures `FRONTEND-SDK` before building and uses its explicit Lean/Lake executables
+for both frontend compilation and shared-library construction, without resolving the selector again.
+Install manifests name fixed companions and complete targets through the shared membership model in
+[Beam/Installation/Components.lean](../Beam/Installation/Components.lean), with references into one
+artifact inventory. The current formats and rejection of earlier incomplete records are documented
+in [COMPATIBILITY.md](COMPATIBILITY.md).
 Keep [Beam/Cli.lean](../Beam/Cli.lean) as the executable entry point: parse top-level options,
-resolve `BEAM_HOME`, and delegate to `runCommand`.
+select the installation adapter, and delegate to `runCommand`. Adapter selection does not validate
+a runtime. Runtime resolution happens at its consumer, after private control-directory validation
+when starting an owner. Recorded-owner stop and recovery require the owning installation but do not resolve its current runtime.
 
 Installer shell helpers are split by ownership boundary: generic path/style helpers live in
 [scripts/install-lib.sh](../scripts/install-lib.sh), write-location prompting and validation live in
@@ -734,6 +801,83 @@ waiters on normal and exceptional exits. On POSIX it also checks actual SIGINT d
 of a later watcher, and restoration of the default SIGINT action after teardown. This cleanup does
 not require raising the minimum Lean version. The
 [support-window roadmap](STATUS.md#lean-support-window) records the remaining tradeoffs.
+
+## Installation admission and workspace ownership
+
+The installer constructs and qualifies a complete target set before publishing its immutable
+manifest. The mutable construction cache records hashes for the complete declared output set
+before qualification and verifies those same bytes before atomically publishing its ready record.
+Cache admission checks every output; a private verified reference carries that inventory into
+staging, which checks copied bytes before executing its daemon. Invalid existing cache entries are
+rejected, and setup preserves the prior `current` installation. This is construction work, not
+per-request artifact hashing.
+
+Construction enters through `obtainVerifiedTarget` with a captured compiler fingerprint and one
+explicit cache. A cache hit and a fresh build return the same verified result. Its inventory uses
+the installation's `Artifact` record, retaining expected hashes through copying; recording newly
+qualified outputs and verifying existing outputs remain separate operations. One checksum-tool
+choice covers construction, cache validation, staging, and the final installation record.
+
+[Beam/Installation/Lookup.lean](../Beam/Installation/Lookup.lean) anchors each
+process to its concrete installation and startup record. Project selection uses local paths and
+locally installed Elan descriptors; it never runs a candidate compiler, calls Elan, downloads, or
+builds a missing runtime. Floating selectors require an explicit local link or an exact project pin.
+A target absent from the record produces setup guidance even if another installation has matching
+compiler versions or source revisions.
+
+Each operation retains a checked observation of the complete installation. Target lookup and
+identity reporting consume its resolved member paths; `doctor` shares one observation for both.
+Subsequent operations repeat the live member checks and compare with the process's startup record.
+Observations rely on immutable publication and stay local to the operation that requested them.
+
+Local Elan aliases must be actual links. On Windows these include directory junctions; an ordinary
+directory does not become an alias merely because its `bin` directory links to an admitted compiler.
+Lean 4.36.0-rc1's Windows `symlinkMetadata` follows links, so Beam's filesystem helper inspects the
+leaf's symbolic-link or mount-point reparse tag without following it. POSIX uses `lstat`.
+A genuinely absent `lean-toolchain` permits the bundled default. Present links, dangling targets,
+metadata failures, and unreadable files do not become absence. Selector inspection preserves typed
+I/O failures; on Windows a non-following directory observation distinguishes a dangling file link
+from a missing marker when metadata follows it.
+
+The CMake installer and Lean reader consume the same writer-generated structural corpus in
+`tests/test-installation-manifest.py`: logical role references require exact inventory membership,
+while case-folded keys only reject collisions. Portable paths reject all ASCII controls and the
+same invalid segments. CMake acceptance never weakens the reader's path contract.
+
+CLI, MCP, daemon, and Lake-helper applications admit the recorded target before lowering its
+complete runtime description into execution configuration. Reuse compares against the retained
+workspace binding; changing project selection requires dropping and recreating that workspace.
+Replacing the process's installation record requires a restart. Switching an installer's `current`
+launcher does not change a process already anchored to the old concrete installation.
+
+Local admission observes request cancellation. MCP performs reuse admission outside its runtime
+mutex and checks the workspace instance again before broker dispatch. Discovery and drop do not require a usable current runtime. Owner
+cleanup additionally requires the matching concrete installation, independently of current runtime
+admission. Runtime identity carries the canonical owning root and published generation as separate
+typed fields. The schema-5 session descriptor retains that root, and its configuration hash binds
+both identity fields. Control compares the recorded root with the invoking executable's concrete
+root; daemon paths cannot establish ownership because native and standalone layouts can overlap.
+This preserves cleanup with missing metadata while rejecting independent nested installations.
+Schema-4 descriptors lack this ownership field and remain fenced for operator recovery.
+The obsolete external-CLI and compiler probes,
+and their native capture/termination implementation, are removed.
+
+The broker's Lean configuration requires its recorded Lake helper. Parent-side environment and
+save requests always call that helper; helper-side `computeServerEnvironment` and
+`computeSaveSpecification` evaluate Lake using the bound target command. Missing Lake configuration,
+and configuration load errors retain their separate behavior. Compiler-origin disagreement fails
+environment preparation before backend startup and requires repair or reinstallation. A shared
+`LeanSaveOutputs` record carries output paths across the unchanged flat JSON protocol. Local save
+preparation retains a live `BuildTrace`; broker preparation retains serialized metadata and the
+helper, with no option-driven switch between execution strategies.
+
+`tests/test-installation-lookup.py` uses real `elan toolchain link` fixtures and exercises two targets,
+aliases, ordinary-directory impostors, floating selectors, changed records, incomplete installations,
+and independent installations with identical bytes. Its candidate compiler files are unusable;
+on POSIX they also record invocation attempts. Lookup must not run them or create provider caches.
+The MCP protocol tests retain creation/admission counters, cancellation, independent workspaces,
+and a controlled drop/recreate race. Native qualification tests selector aliases with live handles,
+generation replacement, and cleanup after provenance becomes unusable in both protocol families.
 
 ## Process
 

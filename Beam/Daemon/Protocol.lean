@@ -17,7 +17,7 @@ namespace Beam.Daemon
 open Beam.Broker
 
 def registrySchemaVersion : Nat :=
-  4
+  5
 
 inductive RegistryLifecycle where
   | live
@@ -87,6 +87,8 @@ structure SessionDescriptor where
   /-- Hash of the complete frozen session configuration. -/
   configHash : String
   daemonBin : String
+  /-- Canonical owning root retained from the admitted runtime, independent of component layout. -/
+  installationRoot : String
   startedAt : String
   deriving ToJson
 
@@ -94,7 +96,7 @@ instance : FromJson SessionDescriptor where
   fromJson? json := do
     Beam.requireOnlyJsonFields "session descriptor" #[
       "schemaVersion", "lifecycle", "daemonId", "capability", "pid", "ownerPid", "port",
-      "workspace", "configHash", "daemonBin", "startedAt"
+      "workspace", "configHash", "daemonBin", "installationRoot", "startedAt"
     ] json
     pure {
       schemaVersion := ← Beam.requiredField json "schemaVersion"
@@ -107,6 +109,7 @@ instance : FromJson SessionDescriptor where
       workspace := ← Beam.requiredField json "workspace"
       configHash := ← Beam.requiredField json "configHash"
       daemonBin := ← Beam.requiredField json "daemonBin"
+      installationRoot := ← Beam.requiredField json "installationRoot"
       startedAt := ← Beam.requiredField json "startedAt"
     }
 

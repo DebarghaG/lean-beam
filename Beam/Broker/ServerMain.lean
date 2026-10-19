@@ -6,8 +6,21 @@ Author: Emilio J. Gallego Arias
 
 import Beam.Broker.Server
 import Beam.Broker.LakeHelperMain
+import Beam.BuildInfo
+import Beam.Installation.Lookup
 
-def main (args : List String) : IO Unit :=
+def main (args : List String) : IO Unit := do
+  let bind := do
+    let installation ← Beam.Installation.current .daemon
+    pure installation.projectRuntime
   match args with
-  | "lake-helper" :: helperArgs => Beam.Broker.LakeHelperMain.main helperArgs
-  | _ => Beam.Broker.main args
+  | ["build-info"] => IO.println (Lean.Json.mkObj [
+      ("compiledLeanRevision", Lean.toJson Beam.BuildInfo.compiled.compilerRevision),
+      ("loadedLeanRevision", Lean.toJson Lean.githash)
+    ]).compress
+  | "lake-helper" :: helperArgs => Beam.Broker.LakeHelperMain.main bind helperArgs
+  | _ =>
+      let resolve ← bind
+      Beam.Broker.runDaemon (fun root => do
+        let runtime ← resolve root
+        pure (Beam.Broker.BrokerConfig.ofRuntime root runtime, runtime.configHash root)) args

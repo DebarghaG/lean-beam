@@ -8,7 +8,7 @@ import Lean
 import Lean.Data.Lsp.Extra
 import Lean.Data.Lsp.LanguageFeatures
 import Beam.Broker.Config
-import Beam.Broker.LakeEnv
+import Beam.Broker.LakeHelper
 import Beam.Broker.Protocol
 import Beam.LSP.Goals
 import Beam.LSP.RunAt
@@ -32,12 +32,15 @@ structure DiagnosticsBarrierResult where
   saveReadiness : Beam.LSP.Save.SaveReadinessResult
   deriving Lean.FromJson, Lean.ToJson
 
-def leanCommand (config : BrokerConfig) : IO (String × Array String × Array (String × Option String)) := do
+def leanCommand (config : BrokerConfig) (control : LakeHelperControl := {}) :
+    IO (Except BrokerFailure (String × Array String × Array (String × Option String))) := do
   let some leanConfig := config.lean?
     | throw <| IO.userError "Lean backend is not configured"
   let plugin ← Beam.resolveExistingPath leanConfig.plugin
-  let lakeEnv ← leanServerLakeEnv config.root (some leanConfig.command) leanConfig.lakeHelper?
-  pure (
+  let lakeEnv ← match ← runLakeHelperServerEnv leanConfig.lakeHelper { root := config.root.toString } control with
+    | .error failure => return .error failure
+    | .ok env => pure env
+  pure <| .ok (
     leanConfig.command,
     #["--server"] ++ lakeEnv.moreServerArgs ++
       #[s!"--plugin={plugin}", "-Dexperimental.module=true"],

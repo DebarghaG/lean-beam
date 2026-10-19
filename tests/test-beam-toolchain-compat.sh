@@ -33,7 +33,8 @@ case "$bundle_timeout" in
     ;;
 esac
 
-if ! validated_registry_entries="$(beam_test_read_registry_entries validated-lean-toolchains)"; then
+# Validate construction policy before creating fixture state or invoking the build.
+if ! beam_test_read_registry_entries validated-lean-toolchains > /dev/null; then
   echo "failed to read validated Lean toolchain registry" >&2
   exit 1
 fi
@@ -42,8 +43,8 @@ tmp_bundle_dir="$(mktemp -d /tmp/beam-toolchain-bundles-XXXXXX)"
 tmp_env_root="$(mktemp -d /tmp/beam-toolchain-env-XXXXXX)"
 build_stdout="$tmp_env_root/build.stdout"
 build_stderr="$tmp_env_root/build.stderr"
-bundle_stdout="$tmp_env_root/bundle-install.stdout"
-bundle_stderr="$tmp_env_root/bundle-install.stderr"
+bundle_stdout="$tmp_env_root/construction.stdout"
+bundle_stderr="$tmp_env_root/construction.stderr"
 admission_stdout="$tmp_env_root/admission.stdout"
 admission_stderr="$tmp_env_root/admission.stderr"
 stale_project_root="$tmp_env_root/stale-diagnostic-project"
@@ -171,52 +172,57 @@ sys.exit(rc)
 PY
 }
 
-run_bundle_install() {
+run_installation_construction() {
   local rc=0
   (
     unset BEAM_HOME BEAM_SESSION_ROOT
     export HOME="$tmp_env_root/home"
     export CODEX_HOME="$tmp_env_root/codex"
     export CLAUDE_HOME="$tmp_env_root/claude"
-    export BEAM_INSTALL_BUNDLE_DIR="$tmp_bundle_dir"
+    export BEAM_INSTALL_ROOT="$tmp_bundle_dir/install-root"
+    export BEAM_BIN_HOME="$tmp_env_root/bin"
     run_with_timeout "$bundle_timeout" "$bundle_stdout" "$bundle_stderr" \
-      ./.lake/build/bin/beam-cli bundle-install "$toolchain"
+      bash scripts/install-beam.sh --dont-ask --toolchain "$toolchain"
   ) || rc=$?
   if [ "$rc" -ne 0 ]; then
-    print_toolchain_context "bundle install failed"
+    print_toolchain_context "installation construction failed"
     return "$rc"
   fi
 }
 
-run_toolchain_admission_check() {
-  local expected_admission="release-line"
-  local expected_release_line=""
+run_target_membership_check() {
+  local installation
+  if ! installation="$(cd -P "$tmp_bundle_dir/install-root/current" && pwd)"; then
+    print_toolchain_context "constructed installation is unavailable"
+    return 1
+  fi
+  stale_wrapper_command=(env "HOME=$tmp_env_root/home" "CODEX_HOME=$tmp_env_root/codex"
+    "CLAUDE_HOME=$tmp_env_root/claude" "ELAN_HOME=$host_elan_home"
+    "$installation/bin/lean-beam" --root "$stale_project_root")
+  if ! target_lean="$(python3 - "$installation/manifest.json" <<'PYTHON'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    targets = json.load(stream)["components"]["targets"]
+assert len(targets) == 1, targets
+print(targets[0]["lean"])
+PYTHON
+)"; then
+    print_toolchain_context "constructed installation does not declare one target"
+    return 1
+  fi
+  target_lake="$(dirname "$target_lean")/lake"
   prepare_stale_diagnostic_project
-  if grep -qxF -- "$toolchain" <<< "$validated_registry_entries"; then
-    expected_admission="validated"
-  fi
   if ! run_stale_wrapper doctor > "$admission_stdout" 2> "$admission_stderr"; then
-    print_toolchain_context "toolchain admission doctor failed"
+    print_toolchain_context "recorded target doctor failed"
     return 1
   fi
-  if ! grep -q "project toolchain admission: $expected_admission" "$admission_stdout"; then
-    print_toolchain_context "toolchain admission classification changed"
+  if ! grep -qxF 'target membership: present' "$admission_stdout" ||
+      ! grep -qxF "installation root: $installation" "$admission_stdout" ||
+      ! grep -qxF "lean binary: $target_lean" "$admission_stdout"; then
+    print_toolchain_context "doctor did not use the constructed target binding"
     return 1
-  fi
-  if ! grep -q 'project toolchain accepted: true' "$admission_stdout"; then
-    print_toolchain_context "accepted toolchain was rejected by doctor"
-    return 1
-  fi
-  if ! grep -q 'bundle ready: true' "$admission_stdout"; then
-    print_toolchain_context "qualified bundle was not marked ready"
-    return 1
-  fi
-  if [ "$expected_admission" = "release-line" ]; then
-    expected_release_line="$(printf '%s\n' "$toolchain" | sed -E 's#^leanprover/lean4:v([0-9]+\.[0-9]+)\..*$#\1#')"
-    if ! grep -q "project toolchain release line: $expected_release_line" "$admission_stdout"; then
-      print_toolchain_context "release-line doctor classification changed"
-      return 1
-    fi
   fi
 }
 
@@ -263,15 +269,7 @@ if expected not in messages:
 PY
 }
 
-stale_wrapper_command=(
-  env
-  "HOME=$tmp_env_root/home"
-  "CODEX_HOME=$tmp_env_root/codex"
-  "CLAUDE_HOME=$tmp_env_root/claude"
-  "ELAN_HOME=$host_elan_home"
-  "BEAM_INSTALL_BUNDLE_DIR=$tmp_bundle_dir"
-  ./scripts/lean-beam --root "$stale_project_root"
-)
+stale_wrapper_command=()
 
 run_stale_wrapper() {
   ${stale_wrapper_command[@]+"${stale_wrapper_command[@]}"} "$@"
@@ -318,7 +316,7 @@ def aVal : Nat := old
 EOF
   (
     cd "$stale_project_root"
-    lake build SaveSmoke/A.lean > "$stale_build_stdout" 2> "$stale_build_stderr"
+    "$target_lake" build SaveSmoke/A.lean > "$stale_build_stdout" 2> "$stale_build_stderr"
   ) || rc=$?
   if [ "$rc" -ne 0 ]; then
     print_toolchain_context "stale diagnostic fixture build failed"
@@ -352,7 +350,7 @@ EOF
   fi
   (
     cd "$stale_project_root"
-    lake build SaveSmoke/A.lean > "$stale_build_stdout" 2> "$stale_build_stderr"
+    "$target_lake" build SaveSmoke/A.lean > "$stale_build_stdout" 2> "$stale_build_stderr"
   ) || rc=$?
   if [ "$rc" -ne 0 ]; then
     print_toolchain_context "changed stale diagnostic fixture build failed"
@@ -379,7 +377,7 @@ run_module_artifact_compat() {
   export LAKE_ARTIFACT_CACHE
   local signature="$stale_project_root/.lake/build/lib/lean/SaveSmoke/ModuleB.ir.sig"
   prepare_stale_diagnostic_project
-  if ! (cd "$stale_project_root" && LAKE_ARTIFACT_CACHE=false lake --no-cache build \
+  if ! (cd "$stale_project_root" && LAKE_ARTIFACT_CACHE=false "$target_lake" --no-cache build \
       SaveSmoke/ModuleB.lean > "$module_build_stdout" 2> "$module_build_stderr"); then
     print_toolchain_context "module fixture build failed"
     return 1
@@ -423,9 +421,9 @@ PY
   if ! stop_stale_owner; then
     return 1
   fi
-  if ! (cd "$stale_project_root" && LAKE_ARTIFACT_CACHE=false lake --no-cache build -v \
+  if ! (cd "$stale_project_root" && LAKE_ARTIFACT_CACHE=false "$target_lake" --no-cache build -v \
       SaveSmoke/ModuleB.lean > "$module_build_stdout" 2> "$module_build_stderr" &&
-      lake env lean CheckModuleB.lean >> "$module_build_stdout" 2>> "$module_build_stderr"); then
+      "$target_lake" env lean CheckModuleB.lean >> "$module_build_stdout" 2>> "$module_build_stderr"); then
     print_toolchain_context "saved module replay or import failed"
     return 1
   fi
@@ -435,7 +433,7 @@ PY
     print_toolchain_context "saved module was rebuilt instead of replayed"
     return 1
   fi
-  if ! (cd "$stale_project_root" && lake --no-cache build checkModuleBNative >> "$module_build_stdout" 2>> "$module_build_stderr" &&
+  if ! (cd "$stale_project_root" && "$target_lake" --no-cache build checkModuleBNative >> "$module_build_stdout" 2>> "$module_build_stderr" &&
       test "$(.lake/build/bin/checkModuleBNative)" = 2); then
     print_toolchain_context "saved module native compilation or execution failed"
     return 1
@@ -443,7 +441,7 @@ PY
 }
 
 run_step "build beam-cli" run_build
-run_step "bundle install $toolchain" run_bundle_install
-run_step "toolchain admission $toolchain" run_toolchain_admission_check
+run_step "construct installation for $toolchain" run_installation_construction
+run_step "recorded target membership for $toolchain" run_target_membership_check
 run_step "module artifact replay $toolchain" run_module_artifact_compat
 run_step "stale diagnostic wording $toolchain" run_stale_diagnostic_compat

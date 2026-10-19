@@ -1,0 +1,256 @@
+[
+  {
+    "name": "exact-membership",
+    "valid": true
+  },
+  {
+    "name": "exact-uppercase-membership",
+    "valid": true,
+    "destination": "bin/BEAM-DAEMON@EXE@",
+    "reference": "bin/BEAM-DAEMON@EXE@"
+  },
+  {
+    "name": "unicode-membership",
+    "valid": true,
+    "destination": "bin/helper-λ@EXE@",
+    "reference": "bin/helper-λ@EXE@"
+  },
+  {
+    "name": "reference-case-mismatch",
+    "valid": false,
+    "reference": "bin/BEAM-DAEMON@EXE@"
+  },
+  {
+    "name": "control-00",
+    "valid": false,
+    "destination": "bin/helper\u0000name@EXE@",
+    "reference": "bin/helper\u0000name@EXE@"
+  },
+  {
+    "name": "control-01",
+    "valid": false,
+    "destination": "bin/helper\u0001name@EXE@",
+    "reference": "bin/helper\u0001name@EXE@"
+  },
+  {
+    "name": "control-02",
+    "valid": false,
+    "destination": "bin/helper\u0002name@EXE@",
+    "reference": "bin/helper\u0002name@EXE@"
+  },
+  {
+    "name": "control-03",
+    "valid": false,
+    "destination": "bin/helper\u0003name@EXE@",
+    "reference": "bin/helper\u0003name@EXE@"
+  },
+  {
+    "name": "control-04",
+    "valid": false,
+    "destination": "bin/helper\u0004name@EXE@",
+    "reference": "bin/helper\u0004name@EXE@"
+  },
+  {
+    "name": "control-05",
+    "valid": false,
+    "destination": "bin/helper\u0005name@EXE@",
+    "reference": "bin/helper\u0005name@EXE@"
+  },
+  {
+    "name": "control-06",
+    "valid": false,
+    "destination": "bin/helper\u0006name@EXE@",
+    "reference": "bin/helper\u0006name@EXE@"
+  },
+  {
+    "name": "control-07",
+    "valid": false,
+    "destination": "bin/helper\u0007name@EXE@",
+    "reference": "bin/helper\u0007name@EXE@"
+  },
+  {
+    "name": "control-08",
+    "valid": false,
+    "destination": "bin/helper\bname@EXE@",
+    "reference": "bin/helper\bname@EXE@"
+  },
+  {
+    "name": "control-09",
+    "valid": false,
+    "destination": "bin/helper\tname@EXE@",
+    "reference": "bin/helper\tname@EXE@"
+  },
+  {
+    "name": "control-10",
+    "valid": false,
+    "destination": "bin/helper\nname@EXE@",
+    "reference": "bin/helper\nname@EXE@"
+  },
+  {
+    "name": "control-11",
+    "valid": false,
+    "destination": "bin/helper\u000bname@EXE@",
+    "reference": "bin/helper\u000bname@EXE@"
+  },
+  {
+    "name": "control-12",
+    "valid": false,
+    "destination": "bin/helper\fname@EXE@",
+    "reference": "bin/helper\fname@EXE@"
+  },
+  {
+    "name": "control-13",
+    "valid": false,
+    "destination": "bin/helper\rname@EXE@",
+    "reference": "bin/helper\rname@EXE@"
+  },
+  {
+    "name": "control-14",
+    "valid": false,
+    "destination": "bin/helper\u000ename@EXE@",
+    "reference": "bin/helper\u000ename@EXE@"
+  },
+  {
+    "name": "control-15",
+    "valid": false,
+    "destination": "bin/helper\u000fname@EXE@",
+    "reference": "bin/helper\u000fname@EXE@"
+  },
+  {
+    "name": "control-16",
+    "valid": false,
+    "destination": "bin/helper\u0010name@EXE@",
+    "reference": "bin/helper\u0010name@EXE@"
+  },
+  {
+    "name": "control-17",
+    "valid": false,
+    "destination": "bin/helper\u0011name@EXE@",
+    "reference": "bin/helper\u0011name@EXE@"
+  },
+  {
+    "name": "control-18",
+    "valid": false,
+    "destination": "bin/helper\u0012name@EXE@",
+    "reference": "bin/helper\u0012name@EXE@"
+  },
+  {
+    "name": "control-19",
+    "valid": false,
+    "destination": "bin/helper\u0013name@EXE@",
+    "reference": "bin/helper\u0013name@EXE@"
+  },
+  {
+    "name": "control-20",
+    "valid": false,
+    "destination": "bin/helper\u0014name@EXE@",
+    "reference": "bin/helper\u0014name@EXE@"
+  },
+  {
+    "name": "control-21",
+    "valid": false,
+    "destination": "bin/helper\u0015name@EXE@",
+    "reference": "bin/helper\u0015name@EXE@"
+  },
+  {
+    "name": "control-22",
+    "valid": false,
+    "destination": "bin/helper\u0016name@EXE@",
+    "reference": "bin/helper\u0016name@EXE@"
+  },
+  {
+    "name": "control-23",
+    "valid": false,
+    "destination": "bin/helper\u0017name@EXE@",
+    "reference": "bin/helper\u0017name@EXE@"
+  },
+  {
+    "name": "control-24",
+    "valid": false,
+    "destination": "bin/helper\u0018name@EXE@",
+    "reference": "bin/helper\u0018name@EXE@"
+  },
+  {
+    "name": "control-25",
+    "valid": false,
+    "destination": "bin/helper\u0019name@EXE@",
+    "reference": "bin/helper\u0019name@EXE@"
+  },
+  {
+    "name": "control-26",
+    "valid": false,
+    "destination": "bin/helper\u001aname@EXE@",
+    "reference": "bin/helper\u001aname@EXE@"
+  },
+  {
+    "name": "control-27",
+    "valid": false,
+    "destination": "bin/helper\u001bname@EXE@",
+    "reference": "bin/helper\u001bname@EXE@"
+  },
+  {
+    "name": "control-28",
+    "valid": false,
+    "destination": "bin/helper\u001cname@EXE@",
+    "reference": "bin/helper\u001cname@EXE@"
+  },
+  {
+    "name": "control-29",
+    "valid": false,
+    "destination": "bin/helper\u001dname@EXE@",
+    "reference": "bin/helper\u001dname@EXE@"
+  },
+  {
+    "name": "control-30",
+    "valid": false,
+    "destination": "bin/helper\u001ename@EXE@",
+    "reference": "bin/helper\u001ename@EXE@"
+  },
+  {
+    "name": "control-31",
+    "valid": false,
+    "destination": "bin/helper\u001fname@EXE@",
+    "reference": "bin/helper\u001fname@EXE@"
+  },
+  {
+    "name": "backslash",
+    "valid": false,
+    "destination": "bin\\helper",
+    "reference": "bin\\helper"
+  },
+  {
+    "name": "empty-segment",
+    "valid": false,
+    "destination": "bin//helper",
+    "reference": "bin//helper"
+  },
+  {
+    "name": "parent",
+    "valid": false,
+    "destination": "bin/../helper",
+    "reference": "bin/../helper"
+  },
+  {
+    "name": "reserved",
+    "valid": false,
+    "destination": "bin/CON.exe",
+    "reference": "bin/CON.exe"
+  },
+  {
+    "name": "trailing-dot",
+    "valid": false,
+    "destination": "bin/helper.",
+    "reference": "bin/helper."
+  },
+  {
+    "name": "trailing-space",
+    "valid": false,
+    "destination": "bin/helper ",
+    "reference": "bin/helper "
+  },
+  {
+    "name": "source-control",
+    "valid": false,
+    "source": "source\nartifact"
+  }
+]

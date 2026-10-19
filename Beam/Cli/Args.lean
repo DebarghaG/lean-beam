@@ -202,7 +202,6 @@ inductive WrapperSessionCommand where
   | status
   | stop
   | recoverGeneration (generation : String)
-  | recoverForce
 
 private def WrapperSessionCommand.text : WrapperSessionCommand → String
   | .serve => "serve"
@@ -210,7 +209,6 @@ private def WrapperSessionCommand.text : WrapperSessionCommand → String
   | .stop => "stop"
   | .recoverGeneration generation =>
       s!"recover --generation {shellQuote generation}"
-  | .recoverForce => "recover --force"
 
 /-- Render one exact public wrapper-session command selector. -/
 def wrapperSessionCommand
