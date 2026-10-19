@@ -29,9 +29,27 @@ def check(prefix, environment):
                            check=True, capture_output=True, timeout=15)
         else:
             (linked / "extra").symlink_to(target, target_is_directory=True)
+        (directory / "existing-construction-dir/.construction").mkdir(parents=True)
+        (directory / "existing-construction-dir/.construction/sentinel").write_text("owned elsewhere")
+        (directory / "existing-construction-file").mkdir()
+        (directory / "existing-construction-file/.construction").write_text("not a directory")
+        if os.name != "nt":
+            (directory / "existing-construction-target").mkdir()
+            (directory / "existing-construction-target/sentinel").write_text("link target")
+            (directory / "existing-construction-link").mkdir()
+            (directory / "existing-construction-link/.construction").symlink_to(
+                directory / "existing-construction-target", target_is_directory=True)
+            toolchain_lib = directory / "toolchain/lib/lean/Init"
+            toolchain_lib.mkdir(parents=True)
+            (toolchain_lib / "Prelude.olean").write_text("toolchain bytes")
+            link_parent = directory / "discarded-build/lake-home/.lake/build/lib/lean"
+            link_parent.mkdir(parents=True)
+            (link_parent / "Init").symlink_to(toolchain_lib, target_is_directory=True)
+            (directory / "build-output").mkdir()
+            (directory / "build-output/linked-plugin").symlink_to("plugin")
         subprocess.run([fixture, directory], env=environment, check=True, timeout=90)
-        if prefix == "beam construction-":
-            check_cache_errors(directory, environment)
+        if os.name != "nt":
+            assert (toolchain_lib / "Prelude.olean").read_text() == "toolchain bytes"
         installation = directory / "one-target"
         assert (installation / "payload.bin").read_bytes() == bytes([0, 10, 13, 10, 26, 128, 255])
         manifest = json.loads((installation / "manifest.json").read_text(encoding="utf-8"))
@@ -42,74 +60,6 @@ def check(prefix, environment):
             assert artifact["source"] == artifact["destination"], artifact
             actual = hashlib.sha256((installation / artifact["destination"]).read_bytes()).hexdigest()
             assert actual == artifact["hash"], artifact
-
-
-def check_cache_errors(directory, environment):
-    cases = directory / "cache-cases"
-    cases.mkdir()
-    record = (directory / "construction-cache/metadata.json").read_bytes()
-    preserved = {}
-    for name in ["malformed", "unreadable", "source-mismatch", "compiler-mismatch"]:
-        path = cases / name / "metadata.json"
-        path.parent.mkdir()
-        data = json.loads(record)
-        if name == "source-mismatch":
-            data["sourceHash"] = "another-source"
-        if name == "compiler-mismatch":
-            data["toolchainFingerprint"]["compilerRevision"] = "b" * 40
-        path.write_bytes(b"invalid json" if name == "malformed" else json.dumps(data).encode())
-        preserved[path] = path.read_bytes()
-    (cases / "directory/metadata.json").mkdir(parents=True)
-    (cases / "dangling-metadata").mkdir()
-    (cases / "dangling-metadata/metadata.json").symlink_to(cases / "missing-metadata")
-    target = cases / "parent-target"
-    target.mkdir()
-    if os.name == "nt":
-        subprocess.run(["cmd", "/d", "/c", "mklink", "/J", cases / "dangling-parent", target],
-                       check=True, capture_output=True, timeout=15)
-    else:
-        (cases / "dangling-parent").symlink_to(target, target_is_directory=True)
-        (cases / "fifo").mkdir()
-        os.mkfifo(cases / "fifo/metadata.json", 0o600)
-    target.rmdir()
-    valid_target = cases / "valid-parent-target"
-    valid_target.mkdir()
-    if os.name == "nt":
-        subprocess.run(["cmd", "/d", "/c", "mklink", "/J", cases / "linked-parent", valid_target],
-                       check=True, capture_output=True, timeout=15)
-    else:
-        (cases / "linked-parent").symlink_to(valid_target, target_is_directory=True)
-    blocked = cases / "blocked-parent"
-    blocked.mkdir()
-    unreadable = cases / "unreadable/metadata.json"
-    handle = None
-    if os.name == "nt":
-        import ctypes
-        from ctypes import wintypes
-        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
-                                      wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
-        kernel.CreateFileW.restype = wintypes.HANDLE
-        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
-        handle = kernel.CreateFileW(str(unreadable), 0x80000000, 0, None, 3, 0x80, None)
-        assert handle != wintypes.HANDLE(-1).value, ctypes.get_last_error()
-        # A file ancestor cannot be traversed on Windows; the locked file covers read denial.
-        blocked.rmdir()
-        blocked.write_text("not a directory")
-    else:
-        assert os.geteuid() != 0, "permission cases require an unprivileged account"
-        unreadable.chmod(0)
-        blocked.chmod(0)
-    try:
-        subprocess.run([fixture, "cache-errors", directory], env=environment, check=True, timeout=30)
-    finally:
-        if handle is not None:
-            kernel.CloseHandle(handle)
-        else:
-            unreadable.chmod(0o600)
-            blocked.chmod(0o700)
-    for path, before in preserved.items():
-        assert path.read_bytes() == before, f"cache rejection rewrote {path}"
 
 
 def check_lake_environment():

@@ -241,8 +241,6 @@ def qualify(args, lean_prefix, scratch):
     env.update(HOME=str(home), USERPROFILE=str(home), CODEX_HOME=str(home / "codex"),
                CLAUDE_HOME=str(home / "claude"), LAKE_ARTIFACT_CACHE="false",
                BEAM_HOME=str(scratch / "forbidden-source"),
-               BEAM_INSTALL_BUNDLE_DIR=str(scratch / "forbidden-install-cache"),
-               BEAM_BUNDLE_DIR=str(scratch / "forbidden-runtime-cache"),
                BEAM_PUBLIC_COMMAND="ambient-wrong-name")
     version = run([beam, "version"], cwd=scratch, env=env).stdout
     assert version.startswith("lean-beam "), version
@@ -527,8 +525,7 @@ def qualify(args, lean_prefix, scratch):
          sys.executable, REPO / "tests/test-lake-helper-lifetime.py",
          "--native-prefix", relocated], cwd=scratch, env=env)
 
-    for name in ["forbidden-source", "forbidden-install-cache", "forbidden-runtime-cache"]:
-        assert not (scratch / name).exists(), name
+    assert not (scratch / "forbidden-source").exists()
     assert not (project / ".beam" / "bundles").exists()
     assert not (home / ".codex").exists() and not (home / ".claude").exists()
     print("native toolchain build/install/relocation/runtime/save checks passed", flush=True)

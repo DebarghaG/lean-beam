@@ -19,20 +19,18 @@ if [ -z "${ELAN_HOME:-}" ] && [ -d "$HOME/.elan" ]; then
   export ELAN_HOME="$HOME/.elan"
 fi
 
-tmp_bundle_dir="$(mktemp -d /tmp/beam-daemon-bundles-XXXXXX)"
 tmp_env_root="$(mktemp -d /tmp/beam-daemon-env-XXXXXX)"
 
 expect_owned_tmp_dir() {
-  beam_test_expect_owned_tmp_dir "$1" beam-daemon-bundles beam-daemon-env
+  beam_test_expect_owned_tmp_dir "$1" beam-daemon-env
 }
 
 remove_owned_tmp_tree() {
   local path="$1"
-  beam_test_remove_owned_tmp_tree "$path" beam-daemon-bundles beam-daemon-env
+  beam_test_remove_owned_tmp_tree "$path" beam-daemon-env
 }
 
 cleanup() {
-  remove_owned_tmp_tree "$tmp_bundle_dir"
   remove_owned_tmp_tree "$tmp_env_root"
 }
 trap cleanup EXIT
@@ -61,11 +59,6 @@ run_step "construct complete test installation" env \
 BEAM_TEST_INSTALLATION="$(cd -P "$tmp_env_root/install-root/current" && pwd)"
 export BEAM_TEST_INSTALLATION
 
-run_step "construction cache mutation and publication fence" env \
-  HOME="$tmp_env_root/home" ELAN_HOME="$host_elan_home" \
-  BEAM_BIN_HOME="$tmp_env_root/bin" \
-  python3 tests/test-installation-cache.py "$BEAM_TEST_INSTALLATION"
-
 mcp_stdio_timeout="${BEAM_MCP_STDIO_TIMEOUT:-60}"
 mcp_stdio_env=()
 if [ "${BEAM_MCP_STDIO_SERVER_TRACE:-1}" != "0" ]; then
@@ -85,22 +78,22 @@ run_step "MCP multi-toolchain workspaces" \
 
 run_step "wrapper daemon tests" env \
   HOME="$tmp_env_root/home" CODEX_HOME="$tmp_env_root/codex" CLAUDE_HOME="$tmp_env_root/claude" \
-  ELAN_HOME="$host_elan_home" BEAM_INSTALL_BUNDLE_DIR="$tmp_bundle_dir" \
+  ELAN_HOME="$host_elan_home" \
   bash tests/test-beam-wrapper-daemon.sh
 
 run_step "wrapper tests" env \
   HOME="$tmp_env_root/home" CODEX_HOME="$tmp_env_root/codex" CLAUDE_HOME="$tmp_env_root/claude" \
-  ELAN_HOME="$host_elan_home" BEAM_INSTALL_BUNDLE_DIR="$tmp_bundle_dir" \
+  ELAN_HOME="$host_elan_home" \
   bash tests/test-beam-wrapper.sh
 
 if [ "$(uname -s)" = "Linux" ]; then
   run_step "sandbox wrapper tests" env \
     HOME="$tmp_env_root/home" CODEX_HOME="$tmp_env_root/codex" CLAUDE_HOME="$tmp_env_root/claude" \
-    ELAN_HOME="$host_elan_home" BEAM_INSTALL_BUNDLE_DIR="$tmp_bundle_dir" \
+    ELAN_HOME="$host_elan_home" \
     bash tests/test-beam-wrapper-sandbox.sh
 fi
 
 run_step "save replay tests" env \
   HOME="$tmp_env_root/home" CODEX_HOME="$tmp_env_root/codex" CLAUDE_HOME="$tmp_env_root/claude" \
-  ELAN_HOME="$host_elan_home" BEAM_INSTALL_BUNDLE_DIR="$tmp_bundle_dir" \
+  ELAN_HOME="$host_elan_home" \
   bash tests/test-beam-save-olean.sh

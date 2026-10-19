@@ -176,8 +176,8 @@ client protocol.
   downloads, or provider search.
 - Local aliases normalize to canonical Lean executables. Unlinked floating selectors require an
   exact project pin or explicit local link; admission performs no remote resolution.
-- Construction caches remain separate from the copied installed runtimes. Normal execution does
-  not read them. Reinstalling a changed target set publishes another immutable generation.
+- Each install builds its targets from scratch; Beam keeps no construction cache. Reinstalling a
+  changed target set publishes another immutable generation.
 - Workspace reuse readmits local selection and compares its retained runtime. A change requires
   dropping and recreating the workspace; an old process cannot adopt a replacement installation
   record. See [CUSTOM_TOOLCHAINS.md](CUSTOM_TOOLCHAINS.md).

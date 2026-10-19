@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Lean FRO LLC. All rights reserved.
 # Released under Apache 2.0 license as described in the file LICENSE.
-"""Build and qualify a small target through the POSIX nonstandard-layout adapter."""
+"""Build, stage, and qualify a small target through the POSIX nonstandard-layout adapter."""
 
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -117,40 +116,41 @@ initialize
         direct = run([sdk / "bin/lake", "script", "run", "beamSharedRuntimeFiles"],
                      cwd=source, env=environment, timeout=30)
         assert direct.returncode != 0, "fixture did not require nonstandard layout adaptation"
-        cache, staging = directory / "cache", directory / "staged target"
+        build, staging = directory / "build", directory / "staged target"
         invocation_log = directory / "lean-invocations"
         polluted = dict(environment, BEAM_TEST_PLUGIN_OBSERVED=str(marker),
                         BEAM_TEST_LEAN_LOG=str(invocation_log),
                         **{key: "unrelated-build-override" for key in [
                             "LAKE_HOME", "LEAN_PATH", "LEAN_SRC_PATH", "LEAN_CC", "LEAN_AR",
                             "LEAN_ABORT_ON_PANIC"]})
-        command = [FIXTURE, "nonstandard-target", sdk, source, cache, staging]
+        command = [FIXTURE, "nonstandard-target", sdk, source, build, staging]
         built = run(command, cwd=ROOT, env=polluted)
         assert built.returncode == 0, built.stdout + built.stderr
         fingerprint = json.loads(built.stdout)
         assert Path(fingerprint["leanPrefix"]) == sdk
         assert Path(fingerprint["leanLibDir"]) == modules
-        record_path, = cache.rglob("metadata.json")
-        record_bytes = record_path.read_bytes()
-        record = json.loads(record_bytes)
-        assert record["toolchainFingerprint"] == fingerprint
-        home = record_path.parent / "lake-home"
+        home = build / "lake-home"
         assert (home / ".lake/build/bin/lake").read_bytes() == (sdk / "bin/lake").read_bytes()
         assert (home / ".lake/build/lib/lean/Lake.olean").is_symlink()
         assert (home / ".lake/build/lib/lean/Lake.olean").resolve() == (modules / "Lake.olean").resolve()
         assert marker.read_text() == fingerprint["compilerRevision"]
         arguments = invocation_log.read_text().splitlines()
-        assert any(arg.startswith("--plugin=") for arg in arguments), arguments
+        plugins = [arg.removeprefix("--plugin=") for arg in arguments if arg.startswith("--plugin=")]
+        assert plugins and all(Path(plugin).parent == staging.resolve() for plugin in plugins), \
+            f"qualification did not load the staged plugin: {plugins}"
         assert any(arg.endswith("/qualification/Probe.lean") for arg in arguments), arguments
-        for artifact in record["artifacts"]:
-            staged = staging / Path(artifact["source"]).name
-            assert hashlib.sha256(staged.read_bytes()).hexdigest() == artifact["hash"], staged
-        marker.unlink()
-        reused = run(command, cwd=ROOT, env=polluted, timeout=30)
-        assert reused.returncode == 0, reused.stdout + reused.stderr
-        assert record_path.read_bytes() == record_bytes, "reuse rewrote the qualified record"
-        assert not marker.exists(), "verified cache reuse rebuilt or requalified the target"
-    print("nonstandard SDK branch, real target build/plugin qualification, cache reuse and verified staging passed")
+        outputs = build / "workspace/.lake/build"
+        staged = sorted(path.name for path in staging.iterdir())
+        assert "beam-daemon" in staged and len(staged) >= 3, staged
+        for name in staged:
+            output, = [path for path in outputs.rglob(name) if path.is_file()]
+            assert (staging / name).read_bytes() == output.read_bytes(), name
+        # Discarding the build removes its private Lake home without following links into the SDK.
+        discarded = run([FIXTURE, "discard-build", build], cwd=ROOT, env=environment, timeout=30)
+        assert discarded.returncode == 0, discarded.stdout + discarded.stderr
+        assert not build.exists()
+        assert (modules / "Lake.olean").is_file() and (original / "lib/lean/Lake.olean").is_file()
+    print("nonstandard SDK branch, real target build, staged-plugin qualification, and safe discard passed")
 
 
 if __name__ == "__main__":

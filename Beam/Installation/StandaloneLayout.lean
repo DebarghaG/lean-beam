@@ -8,11 +8,11 @@ import Lean
 import Beam.Path
 import Beam.Installation.Manifest
 
-open Lean Beam.Installation
+open Lean
 
-namespace Beam.Cli
+namespace Beam.Installation
 
-structure InstallLayout where
+structure StandaloneLayout where
   rootFiles : List String
   runtimePaths : List String
   wrapperPaths : List String
@@ -58,7 +58,7 @@ def installRuntimePaths : List String :=
 def installWrapperPaths : List String :=
   ["bin/lean-beam", "bin/lean-beam-search", "bin/lean-beam-mcp"]
 
-def installLayout : InstallLayout :=
+def standaloneLayout : StandaloneLayout :=
   {
     rootFiles := ["LICENSE"]
     runtimePaths := installRuntimePaths
@@ -188,4 +188,4 @@ def validateInstalledRuntimeForReuse (home : System.FilePath) : IO Unit := do
           describeInstalledRuntimeError runtime
 
 
-end Beam.Cli
+end Beam.Installation

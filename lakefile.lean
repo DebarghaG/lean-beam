@@ -135,6 +135,10 @@ target beamProcessJobObj (pkg) : FilePath := buildNativeObject pkg "process_job"
 lean_lib Beam.LSP where
   globs := #[.andSubmodules `Beam.LSP]
   defaultFacets := #[`shared]
+  -- Darwin otherwise records the absolute build path as the dylib install name, so identical
+  -- sources built in different directories would differ. The plugin is only loaded by path.
+  moreLinkArgs := if System.Platform.isOSX then
+    #["-Wl,-install_name,@rpath/" ++ nameToSharedLib "beam_Beam_LSP"] else #[]
 
 lean_lib Beam where
   defaultFacets := #[`shared]
@@ -275,7 +279,7 @@ lean_exe "beam-mcp-protocol-test" where
   root := `BeamTest.Broker.McpProtocolTest
 
 lean_exe "beam-install-runtime" where
-  root := `Beam.InstallMain
+  root := `Beam.Install.Main
 
 lean_exe "beam-installation-construction-test" where
   srcDir := "tests/lean"

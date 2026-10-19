@@ -15,7 +15,6 @@ beam_fast_cleanup() {
   rm -rf -- "$beam_fast_state_root"
 }
 trap beam_fast_cleanup EXIT
-export BEAM_BUNDLE_DIR="$beam_fast_state_root/bundles"
 export BEAM_SESSION_ROOT="$beam_fast_state_root/sessions"
 
 bash scripts/check-daemon-safety.sh

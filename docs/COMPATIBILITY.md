@@ -39,8 +39,7 @@ A Lean release line is the canonical `major.minor` family recorded in
   use Lake's full `ModulePreSetup.trace` directly. Lake 4.33–4.35 require the C output descriptor;
   4.36 and current nightly SDKs use optional `ModuleOutputDescrs.c?`. Beam supplies the generated C
   descriptor on both shapes.
-- [Construction-cache metadata](../Beam/Cli/RuntimeBundle/Metadata.lean) schema 6,
-  standalone installation manifest schema 4, and native installation manifest schema 3.
+- Standalone installation manifest schema 4 and native installation manifest schema 3.
   Earlier installation records do not establish a complete component
   set and must be reinstalled; they are not accepted as current installation inventories.
 - [CLI session descriptor](../Beam/Daemon/Protocol.lean) schema 5. It freezes one workspace binding,

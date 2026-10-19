@@ -147,7 +147,6 @@ print_write_locations() {
   printf '\n  Core install\n' >&2
   printf '    - Command directory: %s\n' "$bin_home" >&2
   printf '    - Runtime root: %s\n' "$install_root" >&2
-  printf '    - Bundle cache: %s\n' "$install_bundles_root" >&2
   printf '    - Source build output: %s\n' "$repo_root/.lake" >&2
 
   if [ "$install_codex_skills" -eq 1 ] || [ "$install_claude_skills" -eq 1 ] \

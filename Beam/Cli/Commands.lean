@@ -11,7 +11,7 @@ import Beam.Cli.DaemonManager
 import Beam.Cli.Feedback
 import Beam.Cli.Info
 import Beam.Cli.Installation
-import Beam.Cli.InstallPrune
+import Beam.Cli.Prune
 import Beam.Cli.LeanOperation
 import Beam.Cli.Project
 import Beam.Cli.Usage
@@ -243,7 +243,7 @@ def runCommand (installation : Installation) (opts : CliOptions) : IO Unit := do
   | "toolchain-build-info" :: [] =>
       printJsonLine compilerBuildInfo
   | "prune" :: args =>
-      runInstallPrune home args
+      runPrune home args
   | "feedback-report" :: args =>
       Beam.Cli.Feedback.run installation.cliIdentity opts args
   | "serve" :: [] =>

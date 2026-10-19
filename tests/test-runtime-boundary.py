@@ -15,11 +15,10 @@ ROOTS = (
     "Beam.Mcp.Projection", "Beam.Mcp.Protocol", "Beam.Mcp.Server", "Beam.Mcp.StdioServer",
 )
 INSTALL_MODULES = (
-    "Beam.Installation", "Beam.InstallMain", "Beam.Cli.InstallConstruction",
-    "Beam.Cli.Installation", "Beam.Cli.InstallCommands", "Beam.Cli.InstallLayout",
-    "Beam.Cli.Toolchain", "Beam.Cli.RuntimeBundle", "Beam.Cli.RuntimeIdentity",
-    "Beam.Mcp.Application", "Beam.Mcp.Runtime",
+    "Beam.Install", "Beam.Installation", "Beam.Cli.Installation", "Beam.Mcp.Application",
 )
+# Shipped executables and the plugin; none of them may contain the source-side installer.
+SHIPPED_ROOTS = ("Beam.Cli", "Beam.Broker.ServerMain", "Beam.Mcp.ServerMain", "Beam.LSP")
 
 
 def violations_for(roots, forbidden):
@@ -53,8 +52,10 @@ def violations_for(roots, forbidden):
 
 def violations():
     shared_installation = ("Beam.Installation.Lookup", "Beam.Installation.Manifest",
+                           "Beam.Installation.StandaloneLayout",
                            "Beam.Installation.Bundled", "Beam.Mcp.Application", "Beam.Broker.ServerMain")
-    return violations_for(ROOTS, INSTALL_MODULES) + violations_for(shared_installation, ("Beam.Cli",))
+    return (violations_for(ROOTS, INSTALL_MODULES) + violations_for(shared_installation, ("Beam.Cli",)) +
+            violations_for(SHIPPED_ROOTS, ("Beam.Install",)))
 
 
 def main():

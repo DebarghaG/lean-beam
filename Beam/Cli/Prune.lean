@@ -5,23 +5,23 @@ Author: Emilio J. Gallego Arias
 -/
 
 import Lean
-import Beam.Cli.InstallLayout
+import Beam.Installation.StandaloneLayout
 import Beam.Path
 
-open Lean
+open Lean Beam.Installation
 
 namespace Beam.Cli
 
-private structure InstallPruneOptions where
+private structure PruneOptions where
   apply : Bool := false
   help : Bool := false
 
-private structure InstallPruneContext where
+private structure PruneContext where
   home : System.FilePath
   installRoot : System.FilePath
   versionsRoot : System.FilePath
 
-private structure InstallPrunePlan where
+private structure PrunePlan where
   oldRuntimes : Array System.FilePath := #[]
 
 private def installLockPollMs : Nat :=
@@ -74,12 +74,12 @@ private def withInstallLockTimeout
   finally
     releaseInstallLock lockDir
 
-private def installPruneUsage : String :=
+private def pruneUsage : String :=
   "usage: lean-beam prune [--apply]"
 
-private def installPruneHelp : String :=
+private def pruneHelp : String :=
   String.intercalate "\n" [
-    installPruneUsage,
+    pruneUsage,
     "",
     "Preview and optionally remove old installed Beam runtimes.",
     "",
@@ -91,13 +91,13 @@ private def installPruneHelp : String :=
     "Apply removes one validated path at a time and reports each successful removal immediately."
   ]
 
-private def parseInstallPruneOptions (args : List String) : Except String InstallPruneOptions := do
-  let mut opts : InstallPruneOptions := {}
+private def parsePruneOptions (args : List String) : Except String PruneOptions := do
+  let mut opts : PruneOptions := {}
   for arg in args do
     match arg with
     | "--apply" => opts := { opts with apply := true }
     | "-h" | "--help" => opts := { opts with help := true }
-    | _ => throw s!"{installPruneUsage}\nunknown prune option: {arg}"
+    | _ => throw s!"{pruneUsage}\nunknown prune option: {arg}"
   pure opts
 
 private def fail (message : String) : IO α :=
@@ -142,7 +142,7 @@ private def validatedRuntimePayload (versionsRoot : System.FilePath)
       | .invalidInstallRootMarker _ =>
           fail <| s!"refusing to prune runtime under an invalid Beam install root: {resolved}"
 
-private def resolveInstallPruneContext (home : System.FilePath) : IO InstallPruneContext := do
+private def resolvePruneContext (home : System.FilePath) : IO PruneContext := do
   let home ← Beam.resolveExistingPath home
   let some location := installedRuntimeLocation? home
     | fail s!"prune is only available from an installed Beam runtime: {home}"
@@ -152,7 +152,7 @@ private def resolveInstallPruneContext (home : System.FilePath) : IO InstallPrun
     versionsRoot := location.versionsRoot
   }
 
-private def validateInstallPruneContext (ctx : InstallPruneContext) : IO Unit := do
+private def validatePruneContext (ctx : PruneContext) : IO Unit := do
   let home := ctx.home
   let installRoot := ctx.installRoot
   requireOwnedInstallRoot installRoot
@@ -168,7 +168,7 @@ private def validateInstallPruneContext (ctx : InstallPruneContext) : IO Unit :=
     ]
   validatedRuntimePayload ctx.versionsRoot home
 
-private def oldRuntimePaths (ctx : InstallPruneContext) : IO (Array System.FilePath) := do
+private def oldRuntimePaths (ctx : PruneContext) : IO (Array System.FilePath) := do
   let entries := (← ctx.versionsRoot.readDir).qsort (fun a b => a.fileName < b.fileName)
   let mut paths := #[]
   for entry in entries do
@@ -180,11 +180,11 @@ private def oldRuntimePaths (ctx : InstallPruneContext) : IO (Array System.FileP
       paths := paths.push resolved
   pure paths
 
-private def installPrunePlan (ctx : InstallPruneContext) : IO InstallPrunePlan := do
+private def prunePlan (ctx : PruneContext) : IO PrunePlan := do
   pure { oldRuntimes := ← oldRuntimePaths ctx }
 
-private def printInstallPrunePlan (ctx : InstallPruneContext)
-    (opts : InstallPruneOptions) (plan : InstallPrunePlan) : IO Unit := do
+private def printPrunePlan (ctx : PruneContext)
+    (opts : PruneOptions) (plan : PrunePlan) : IO Unit := do
   IO.println s!"Beam install prune ({if opts.apply then "apply" else "dry run"})"
   IO.println s!"install root: {ctx.installRoot}"
   IO.println s!"current runtime: {ctx.home}"
@@ -195,7 +195,7 @@ private def printInstallPrunePlan (ctx : InstallPruneContext)
     IO.println "restart active agents and MCP clients before applying this cleanup"
     IO.println "dry run only; rerun `lean-beam prune --apply` to remove these paths"
 
-private def removeOldRuntime (ctx : InstallPruneContext) (path : System.FilePath) : IO Bool := do
+private def removeOldRuntime (ctx : PruneContext) (path : System.FilePath) : IO Bool := do
   if !(← path.pathExists) then
     return false
   let resolved ← Beam.resolveExistingPath path
@@ -205,7 +205,7 @@ private def removeOldRuntime (ctx : InstallPruneContext) (path : System.FilePath
   IO.FS.removeDirAll resolved
   pure true
 
-private def applyInstallPrune (ctx : InstallPruneContext) (plan : InstallPrunePlan) : IO Nat := do
+private def applyPrune (ctx : PruneContext) (plan : PrunePlan) : IO Nat := do
   let mut removed := 0
   for path in plan.oldRuntimes do
     if ← removeOldRuntime ctx path then
@@ -213,19 +213,19 @@ private def applyInstallPrune (ctx : InstallPruneContext) (plan : InstallPrunePl
       IO.println s!"removed runtime: {path}"
   pure removed
 
-def runInstallPrune (home : System.FilePath) (args : List String) : IO Unit := do
-  let opts ← IO.ofExcept <| parseInstallPruneOptions args
+def runPrune (home : System.FilePath) (args : List String) : IO Unit := do
+  let opts ← IO.ofExcept <| parsePruneOptions args
   if opts.help then
-    IO.println installPruneHelp
+    IO.println pruneHelp
     return
-  let ctx ← resolveInstallPruneContext home
+  let ctx ← resolvePruneContext home
   withInstallLockTimeout (ctx.installRoot / ".install-lock") 1000 do
-    validateInstallPruneContext ctx
-    let plan ← installPrunePlan ctx
-    printInstallPrunePlan ctx opts plan
+    validatePruneContext ctx
+    let plan ← prunePlan ctx
+    printPrunePlan ctx opts plan
     if opts.apply then
       try
-        let runtimesRemoved ← applyInstallPrune ctx plan
+        let runtimesRemoved ← applyPrune ctx plan
         IO.println s!"removed runtimes: {runtimesRemoved}"
       catch e =>
         IO.eprintln <|

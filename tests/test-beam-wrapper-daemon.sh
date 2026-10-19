@@ -28,11 +28,6 @@ fi
 
 tmp1="$(mktemp -d /tmp/beam-wrapper-daemon-owner-a-XXXXXX)"
 tmp2="$(mktemp -d /tmp/beam-wrapper-daemon-owner-b-XXXXXX)"
-owned_bundle_dir=""
-if [ -z "${BEAM_INSTALL_BUNDLE_DIR:-}" ]; then
-  owned_bundle_dir="$(mktemp -d /tmp/beam-wrapper-daemon-owner-bundles-XXXXXX)"
-  export BEAM_INSTALL_BUNDLE_DIR="$owned_bundle_dir"
-fi
 hold_pid=""
 root_removed="false"
 active_request_pid=""
@@ -185,15 +180,9 @@ cleanup() {
   fi
   "$beam_script" --root "$tmp2" stop > /dev/null 2>&1 || true
   remove_owned_tmp_tree "$tmp2"
-  if [ -n "$owned_bundle_dir" ]; then
-    remove_owned_tmp_tree "$owned_bundle_dir"
-  fi
 }
 trap cleanup EXIT
 
-if [ -n "$owned_bundle_dir" ]; then
-  expect_owned_tmp_dir "$owned_bundle_dir"
-fi
 for tmp in "$tmp1" "$tmp2"; do
   expect_owned_tmp_dir "$tmp"
   rsync -a --exclude='.beam/' tests/save_olean_project/ "$tmp"/
@@ -864,13 +853,11 @@ assert_json_field_equals \
 
 start_slow_request "$tmp1" "shutdown-active" "shutdown-active"
 
-# Ambient cache variables cannot change this installation's fixed components or its live owner.
-drift_bundle_dir="$tmp2/ignored-bundle-cache"
+# Attachment to a live owner succeeds while a second owner for the same root is rejected.
 drift_out="$tmp1/config-drift.out"
 drift_err="$tmp1/config-drift.err"
-if ! BEAM_INSTALL_BUNDLE_DIR="$drift_bundle_dir" \
-    "$beam_script" --root "$tmp1" stats > "$drift_out" 2> "$drift_err"; then
-  echo "expected ordinary attachment to ignore the ambient cache path" >&2
+if ! "$beam_script" --root "$tmp1" stats > "$drift_out" 2> "$drift_err"; then
+  echo "expected ordinary attachment to the live owner" >&2
   cat "$drift_err" >&2
   exit 1
 fi
@@ -878,19 +865,17 @@ assert_json_file_field_equals \
   "frozen-configuration attachment" "$drift_out" ok true "$drift_err"
 drift_owner_out="$tmp1/config-drift-owner.out"
 drift_owner_err="$tmp1/config-drift-owner.err"
-if BEAM_INSTALL_BUNDLE_DIR="$drift_bundle_dir" \
-    "$beam_script" --root "$tmp1" serve \
+if "$beam_script" --root "$tmp1" serve \
       > "$drift_owner_out" 2> "$drift_owner_err"; then
   echo "expected a duplicate owner to be rejected" >&2
   cat "$drift_owner_out" >&2
   exit 1
 fi
 if ! grep -Fq "already owned by a foreground process" "$drift_owner_err"; then
-  echo "expected duplicate-owner diagnostics with the ambient cache override" >&2
+  echo "expected duplicate-owner diagnostics" >&2
   cat "$drift_owner_err" >&2
   exit 1
 fi
-assert_not_exists "$drift_bundle_dir"
 
 # A real target change must reject attachment while preserving the existing session and request.
 original_selector="$(cat "$tmp1/lean-toolchain")"

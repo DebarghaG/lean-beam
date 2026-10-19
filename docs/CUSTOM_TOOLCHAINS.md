@@ -64,8 +64,9 @@ printed before installation inspection, so a broken runtime does not hide record
 
 The POSIX fast suite runs `tests/test-nonstandard-toolchain.py` with the selected installed SDK.
 It puts Lake modules in a distinct library directory, requires the ordinary Lake invocation to
-fail, then builds and plugin-qualifies a small target through the production construction adapter.
-It also checks verified cache reuse and the staged artifact hashes. This regression qualifies
+fail, then builds a small target through the production construction adapter, stages its outputs,
+and qualifies the staged plugin. It also checks that discarding the build directory leaves the SDK's
+linked modules untouched. This regression qualifies
 the layout adapter; a complete stage0 compiler build still needs the smoke below. Nonstandard
 standalone SDK layouts remain unsupported on Windows.
 

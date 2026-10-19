@@ -22,9 +22,7 @@ with tempfile.TemporaryDirectory(prefix="beam installation lookup-") as temporar
         command.write_text(f'#!/bin/sh\nprintf invoked >> "{calls}"\nexit 99\n')
         command.chmod(0o755)
     environment = dict(os.environ, ELAN_HOME=str(directory / "elan"),
-                       BEAM_HOME=str(directory / "foreign"),
-                       BEAM_BUNDLE_DIR=str(directory / "forbidden-build"),
-                       BEAM_INSTALL_BUNDLE_DIR=str(directory / "foreign-cache"))
+                       BEAM_HOME=str(directory / "foreign"))
     elan = shutil.which("elan")
     assert elan, "local link fixtures require elan"
     for alias, target in [("fixture-alias", "sdk-0"), ("fixture-second", "sdk-1"),
@@ -81,5 +79,3 @@ with tempfile.TemporaryDirectory(prefix="beam installation lookup-") as temporar
         else:
             unreadable.parent.chmod(0o700)
     assert not calls.exists(), "lookup invoked a candidate compiler before rejecting it"
-    assert not (directory / "forbidden-build").exists(), "lookup attempted runtime construction"
-    assert not (directory / "foreign-cache").exists(), "lookup searched or created a foreign provider cache"

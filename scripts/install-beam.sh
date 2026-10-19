@@ -32,8 +32,6 @@ bin_home=""
 install_root=""
 versions_root=""
 current_root=""
-state_root=""
-install_bundles_root=""
 beam_cli="$repo_root/.lake/build/bin/beam-cli"
 construction_tool="$repo_root/.lake/build/bin/beam-install-runtime"
 installer_cmd="./scripts/install-beam.sh"
@@ -90,8 +88,6 @@ set_install_root() {
   install_root="$1"
   versions_root="$install_root/versions"
   current_root="$install_root/current"
-  state_root="$install_root/state"
-  install_bundles_root="$state_root/install-bundles"
   install_lock_dir="$install_root/.install-lock"
 }
 
@@ -396,7 +392,7 @@ ensure_install_root_claimable() {
     [ -n "$entry" ] || continue
     base="$(basename "$entry")"
     case "$base" in
-      current|versions|state|"$install_root_marker"|.staging-*|.link-swap-*|.install-lock)
+      current|versions|"$install_root_marker"|.staging-*|.link-swap-*|.install-lock)
         ;;
       *)
         die "refusing to claim install root with unrecognized existing path: $entry"
@@ -717,8 +713,6 @@ validate_install_config() {
   require_not_root "$install_root" "install root"
   require_path_within "$versions_root" "$install_root" "versions root"
   require_path_within "$current_root" "$install_root" "current link"
-  require_path_within "$state_root" "$install_root" "state root"
-  require_path_within "$install_bundles_root" "$state_root" "install bundle root"
 }
 
 read_registry_entries() {
@@ -1056,7 +1050,6 @@ print_install_plan() {
   print_section "$style_blue" "Install Plan"
   print_field "runtime" "$install_root"
   print_field "commands" "$bin_home/{lean-beam,lean-beam-search,lean-beam-mcp}"
-  print_field "bundles" "$install_bundles_root"
   if [ "${#prepared_selected_toolchains[@]}" -gt 0 ]; then
     local first_toolchain=1
     for toolchain in ${prepared_selected_toolchains[@]+"${prepared_selected_toolchains[@]}"}; do
@@ -1324,7 +1317,6 @@ prepare_install_environment() {
   ensure_runtime_artifacts
   ensure_dir_for_install "$bin_home" "bin home"
   ensure_dir_for_install "$versions_root" "versions root"
-  ensure_dir_for_install "$state_root" "state root"
 }
 
 prepare_install_version() {
@@ -1335,9 +1327,8 @@ prepare_install_version() {
   if [ -n "$prepared_source_commit" ]; then
     source_commit_arg="$prepared_source_commit"
   fi
-  ensure_dir_for_install "$install_bundles_root" "construction build cache"
-  confirm_path_edit "construct complete target runtimes in staging" "$staging_root" "$install_bundles_root"
-  prepared_payload_id="$("$construction_tool" construct "$repo_root" "$prepared_frontend_prefix" "$staging_root" "$install_bundles_root" \
+  confirm_path_edit "construct complete target runtimes in staging" "$staging_root"
+  prepared_payload_id="$("$construction_tool" construct "$repo_root" "$prepared_frontend_prefix" "$staging_root" \
     "$source_commit_arg" ${prepared_selected_toolchains[@]+"${prepared_selected_toolchains[@]}"})"
   if [[ ! "$prepared_payload_id" =~ ^[0-9a-f]{64}$ ]]; then
     die "construction tool did not return an installation generation"

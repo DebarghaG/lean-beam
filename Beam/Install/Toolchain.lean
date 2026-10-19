@@ -6,13 +6,12 @@ Author: Emilio J. Gallego Arias
 
 import Lean
 import Beam.Installation.Components
-import Beam.Cli.RuntimeBundle.Source
-import Beam.Cli.RuntimeBundle.ToolchainPolicy
+import Beam.Path
 import Beam.System
 
 open Lean
 
-namespace Beam.Cli
+namespace Beam.Install
 
 structure ToolchainFingerprint where
   leanVersion : String
@@ -21,11 +20,6 @@ structure ToolchainFingerprint where
   lakeVersion : String
   compilerRevision : String
   deriving BEq, Repr, FromJson, ToJson
-
-def bundlePlatform : IO String := do
-  let system := ← Beam.readCmdTrim "uname" #["-s"]
-  let machine := ← Beam.readCmdTrim "uname" #["-m"]
-  pure s!"{system.toLower}-{machine.toLower}"
 
 def ensureElan : IO Unit := do
   unless ← Beam.commandAvailable "elan" do
@@ -55,21 +49,34 @@ private def readRequiredToolchainCmdTrim (toolchain exe : String) (args : Array 
       s!"failed to fingerprint Lean toolchain {toolchain}: `elan run {toolchain} {exe}` returned empty stdout"
   pure text
 
-def toolchainFingerprintKey (fingerprint : ToolchainFingerprint) : String :=
-  String.intercalate "\n" [
-    "lean-version", fingerprint.leanVersion,
-    "lean-prefix", fingerprint.leanPrefix,
-    "lean-libdir", fingerprint.leanLibDir,
-    "lake-version", fingerprint.lakeVersion,
-    "compiler-revision", fingerprint.compilerRevision
-  ]
+private def canonicalNat? (text : String) : Option Nat := do
+  let value ← text.toNat?
+  if s!"{value}" == text then some value else none
 
-def toolchainFingerprintHash (fingerprint : ToolchainFingerprint) : String :=
-  s!"{hashString (toolchainFingerprintKey fingerprint) |>.toNat}"
+/-- The exact version of a canonical `leanprover/lean4:vX.Y.Z[-rcN]` selector, if it is one. -/
+def canonicalLeanVersion? (toolchain : String) : Option String := do
+  let selectorPrefix := "leanprover/lean4:v"
+  unless toolchain.startsWith selectorPrefix do none
+  let version := (toolchain.drop selectorPrefix.length).toString
+  let (stable, rc?) ← match version.splitOn "-" with
+    | [stable] => some (stable, none)
+    | [stable, prerelease] => do
+        unless prerelease.startsWith "rc" do none
+        let rc ← canonicalNat? (prerelease.drop 2).toString
+        unless rc > 0 do none
+        some (stable, some rc)
+    | _ => none
+  let [major, minor, patch] := stable.splitOn "." | none
+  let parts ← [major, minor, patch].mapM canonicalNat?
+  let rendered := ".".intercalate (parts.map toString) ++
+    match rc? with
+    | some rc => s!"-rc{rc}"
+    | none => ""
+  if rendered == version then some rendered else none
 
+/-- A canonical selector must name the compiler that `lean --version` reports. -/
 def expectedCanonicalLeanVersionPrefix? (toolchain : String) : Option String := do
-  let canonical ← parseCanonicalLeanToolchain? toolchain
-  some s!"Lean (version {canonical.versionText},"
+  some s!"Lean (version {← canonicalLeanVersion? toolchain},"
 
 /-- Observe one already selected SDK; every command uses this concrete installation. -/
 def fingerprintLeanInstallation (root : System.FilePath) : IO ToolchainFingerprint := do
@@ -110,25 +117,4 @@ def toolchainFingerprint (toolchain : String) : IO ToolchainFingerprint := do
       ]
   pure fingerprint
 
-def bundleIdFor (toolchain : String) (fingerprint : ToolchainFingerprint) (source platformKey : String) :
-    String :=
-  let acc := mixField 14695981039346656037 toolchain
-  let acc := mixField acc (toolchainFingerprintKey fingerprint)
-  let acc := mixField acc source
-  let acc := mixField acc platformKey
-  s!"{acc.toNat}"
-
-/-- Inputs shared by all targets in one construction operation; source files stay immutable. -/
-structure ConstructionInputs where
-  sourceHash : String
-  platform : String
-
-def captureConstructionInputs (home : System.FilePath) : IO ConstructionInputs := do
-  pure { sourceHash := ← sourceHash home, platform := ← bundlePlatform }
-
-def bundleDirForFingerprint (cacheRoot : System.FilePath) (inputs : ConstructionInputs)
-    (toolchain : String) (fingerprint : ToolchainFingerprint) : System.FilePath × String :=
-  let bundleId := bundleIdFor toolchain fingerprint inputs.sourceHash inputs.platform
-  (cacheRoot / inputs.platform / bundleId, bundleId)
-
-end Beam.Cli
+end Beam.Install

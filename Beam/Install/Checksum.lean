@@ -9,7 +9,7 @@ import Beam.Installation.Components
 open Lean
 
 /- Construction-only byte hashing. Runtime selection never depends on checksum subprocesses. -/
-namespace Beam.Cli.ConstructionHash
+namespace Beam.Install.Checksum
 
 private def require (condition : Bool) (message : String) : IO Unit :=
   unless condition do throw <| IO.userError message
@@ -48,4 +48,4 @@ def Context.fileHash (context : Context) (path : System.FilePath) : IO String :=
 def Context.textHash (context : Context) (text : String) : IO String := do
   digestOutput (← IO.Process.output { cmd := context.command, args := context.arguments } (some text))
 
-end Beam.Cli.ConstructionHash
+end Beam.Install.Checksum

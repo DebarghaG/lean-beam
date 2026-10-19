@@ -8,6 +8,11 @@ This project keeps a lightweight, reverse-chronological changelog. Dates use `YY
 
 ### Changed
 
+- Remove the standalone installer's persistent construction cache under
+  `BEAM_INSTALL_ROOT/state/install-bundles`, which grew by roughly 300 MB per target for every
+  source change and had no cleanup command. Each install now builds its targets in a temporary
+  directory inside staging; Lake's artifact cache keeps rebuilds of unchanged targets fast. An
+  existing `state/` directory is no longer used and can be deleted.
 - Document CLI/MCP launch for Beam bundled with Lean alongside checkout installation.
   Clarify complete installer target selections, make installed skill links portable, and correct
   the documented construction-cache and session descriptor schema versions

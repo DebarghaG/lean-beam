@@ -4,7 +4,7 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Author: Emilio J. Gallego Arias
 -/
 
-import Beam.Cli.InstallConstruction
+import Beam.Install.Construction
 import Beam.Cli.Installation
 
 open Beam Beam.Cli Beam.Installation
@@ -60,7 +60,7 @@ private def stage (directory root : System.FilePath) : IO InstallManifest := do
   let cli := "libexec/beam-cli" ++ suffix
   let mcp := "libexec/lean-beam-mcp" ++ suffix
   for path in [cli, mcp, "LICENSE"] do write root path s!"fixed bytes for {path}"
-  InstallConstruction.finalize root none {
+  Beam.Install.Construction.finalize root none {
     frontends := { cli, mcp, compilerRevision := Lean.githash }
     license := "LICENSE", targets
   }

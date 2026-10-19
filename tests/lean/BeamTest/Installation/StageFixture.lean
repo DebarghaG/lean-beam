@@ -4,7 +4,7 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Author: Emilio J. Gallego Arias
 -/
 
-import Beam.Cli.InstallConstruction
+import Beam.Install.Construction
 
 private def copy (source destination : System.FilePath) : IO Unit := do
   if let some parent := destination.parent then IO.FS.createDirAll parent
@@ -36,21 +36,21 @@ def main (args : List String) : IO Unit := do
     copy (source / "scripts" / wrapper) (root / "bin" / wrapper)
   let compiler := System.FilePath.mk lean
   let compilerRoot := (compiler.parent >>= System.FilePath.parent).getD compiler
-  let fingerprint : Beam.Cli.ToolchainFingerprint := {
+  let fingerprint : Beam.Install.ToolchainFingerprint := {
     leanVersion := "same-compiler test fixture", lakeVersion := "same-compiler test fixture"
     leanPrefix := compilerRoot.toString, leanLibDir := (compilerRoot / "lib/lean").toString
     compilerRevision := Beam.compiledCompilerRevision
   }
-  Beam.Cli.InstallConstruction.stageFrontendSharedLibraries source root (source / ".beam/stage-fixture-build") fingerprint
-  let libraries ← Beam.Cli.buildSharedRuntimePaths (source / ".beam/stage-fixture-build") source fingerprint
-  Beam.Cli.InstallConstruction.stageSharedLibraries (libraries.map (fun path => source / ".lake/build" / System.FilePath.mk path))
+  Beam.Install.Construction.stageFrontendSharedLibraries source root (source / ".beam/stage-fixture-build") fingerprint
+  let libraries ← Beam.Install.buildSharedRuntimePaths (source / ".beam/stage-fixture-build") source fingerprint
+  Beam.Install.Construction.stageSharedLibraries (libraries.map (fun path => source / ".lake/build" / System.FilePath.mk path))
     (root / "runtimes/0") "bin"
   let target : Beam.Installation.Target := {
     lean := (← Beam.resolveExistingPath lean).toString, daemon, plugin, toolchain := selector
     compilerRevision := Beam.compiledCompilerRevision
     leanVersion := "same-compiler test fixture", lakeVersion := "same-compiler test fixture"
   }
-  let manifest ← Beam.Cli.InstallConstruction.finalize root (some commit) {
+  let manifest ← Beam.Install.Construction.finalize root (some commit) {
     frontends := { cli, mcp, compilerRevision := Beam.compiledCompilerRevision }
     license := "LICENSE", targets := #[target]
   }

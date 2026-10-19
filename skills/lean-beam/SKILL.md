@@ -313,7 +313,7 @@ Use `lean-beam`, not raw JSON and not raw LSP.
 - `lean-beam --root ROOT stop` requires an explicit root; `lean-beam status` and `lean-beam stats`
   may infer a unique root
 - `lean-beam prune` previews old installed runtimes; restart active agents and MCP clients before
-  any `--apply`; construction caches are outside this runtime-maintenance command
+  any `--apply`
 - wrapper commands talk to the per-project Beam daemon over localhost TCP; they are not direct in-process Lean calls
 - `lean-beam serve` prints a running-session JSON response after backend readiness and keeps the wrapper
   process alive as the session owner; an inherited pipe ties daemon lifetime to that process without

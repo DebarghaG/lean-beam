@@ -68,10 +68,10 @@ Selected-SDK construction applies the following environment policy to its Lake i
 The same filter applies to standalone frontend and target builds. Ordinary developer `lake build`
 retains Lake's environment behavior. In particular, Lake can use host `CC`/`AR` when an SDK lacks
 its packaged compiler/archiver; these differ from the cleared `LEAN_CC`/`LEAN_AR` overrides.
-The standalone construction-cache key covers Beam source, platform, and the captured Lean SDK
-fingerprint, and does not cover arbitrary host environment changes. Reusing it requires an unchanged
-native SDK and host compiler configuration. Deliberately changing that configuration requires a fresh
-source workspace and construction cache, with `LAKE_CACHE_DIR=` to avoid restoring prior Lake objects.
+Standalone construction builds each target in a fresh workspace and keeps no Beam-owned cache.
+Lake's artifact cache is keyed by its own build traces, which do not cover arbitrary host environment
+changes. After deliberately changing the native SDK or host compiler configuration, construct with
+`LAKE_CACHE_DIR=` to avoid restoring prior Lake objects.
 
 ### Build Record And Staging
 
@@ -142,11 +142,10 @@ blank, and publishes only after every target is ready. Target membership and sou
 therefore participate in the generation. Reusing a generation validates and retains its record;
 the installer never refreshes a published manifest in place. A failed construction leaves `current`
 unchanged. Each launcher link is published with a same-filesystem rename, preserving its old target
-if replacement fails. The shared cache remains a mutable construction input, separate from those copied artifacts.
-Its successful record binds the daemon, plugin, and every declared shared library to hashes captured
-before qualification and verified afterward. Reuse checks that complete record. Staging checks its
-copies against the qualified hashes and executes only the staged daemon. Invalid cache entries are
-rejected before publication; hashing arbitrary replacement bytes into a new manifest is not admission.
+if replacement fails. Each target is built in a temporary directory inside staging, removed before
+the inventory is taken. Construction copies the declared daemon, plugin, and shared libraries into
+staging, then qualifies the staged plugin and executes only the staged daemon, so the inventory
+records exactly the bytes that passed qualification.
 
 Native installation copies Beam's contribution into staging. An empty destination need not yet
 contain Lean; the record alone therefore does not establish a usable complete toolchain. The
@@ -176,12 +175,12 @@ Changing native source provenance or build generation alone does not change its 
 Admission checks those fields independently against the executable's frozen identity, and a fresh
 native build receives a new embedded `buildId`. Standalone source provenance and schema version
 participate in its installation-record digest. Changing a serializer can therefore change a digest
-even when the component bytes remain identical. The construction-cache record is separate from
-both published formats: its qualification and workspace data do not become installation identity.
+even when the component bytes remain identical. Qualification and build workspace data never
+become installation identity.
 
 ## Runtime Selection And Maintenance
 
-Toolchain mode ignores `BEAM_HOME`, `BEAM_INSTALL_BUNDLE_DIR`, and `BEAM_BUNDLE_DIR`. It neither
+Toolchain mode ignores `BEAM_HOME`. It neither
 fetches Beam sources nor builds or selects standalone runtime bundles. Missing runtime files are
 errors; reinstall the toolchain to repair them. Session and other state-location controls keep
 their normal meaning.
@@ -230,7 +229,7 @@ in [the sync and save contract](SYNC_AND_DIAGNOSTICS.md).
 
 Runtime membership is owned by the application installation adapters. Both supply
 [one typed runtime description](../Beam/Runtime.lean) to session and broker code; execution does not
-interpret SDK directories, installation manifests, or construction caches. Every shipped entry
+interpret SDK directories or installation manifests. Every shipped entry
 point derives its binding from its concrete executable location. Daemons independently validate
 configuration hashes; helper and workspace-init requests cannot supply replacement component paths.
 

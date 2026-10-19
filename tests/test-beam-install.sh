@@ -81,7 +81,6 @@ if ! printf '%s\n' ${validated_toolchains[@]+"${validated_toolchains[@]}"} | gre
   exit 1
 fi
 source_checkout="$tmp_root/source-checkout"
-beam_lsp_plugin_shared_lib="$(beam_shared_lib_name beam_Beam_LSP)"
 
 assert_doctor_contains() {
   local label="$1"
@@ -216,71 +215,17 @@ path_without_elan() {
   )
 }
 
-assert_bundle_layout() {
-  local bundle_root="$1"
-  shift
-  local metadata_files=()
-  local metadata=""
-  local expected_toolchain=""
-  local found=""
-  while IFS= read -r metadata; do
-    [ -n "$metadata" ] || continue
-    metadata_files+=("$metadata")
-  done < <(find "$bundle_root" -name metadata.json | sort)
-  if [ "${#metadata_files[@]}" -eq 0 ]; then
-    echo "missing bundle metadata under $bundle_root" >&2
+assert_no_construction_state() {
+  local install_root="$1"
+  local version=""
+  assert_not_exists "$install_root/state"
+  for version in "$install_root"/versions/*; do
+    assert_not_exists "$version/.construction"
+  done
+  if compgen -G "$install_root/.staging-*" > /dev/null; then
+    echo "construction retained a staging tree under $install_root" >&2
     exit 1
   fi
-  for expected_toolchain in "$@"; do
-    found=""
-    for metadata in ${metadata_files[@]+"${metadata_files[@]}"}; do
-      if grep -F "\"toolchain\": \"$expected_toolchain\"" "$metadata" > /dev/null; then
-        found="$metadata"
-        break
-      fi
-    done
-    if [ -z "$found" ]; then
-      echo "bundle metadata does not mention expected toolchain $expected_toolchain under $bundle_root" >&2
-      exit 1
-    fi
-    python3 - "$found" "$beam_lsp_plugin_shared_lib" <<'PYCACHE'
-import hashlib
-import json
-import os
-from pathlib import Path
-import sys
-path = Path(sys.argv[1])
-beam_plugin_name = sys.argv[2]
-record = json.loads(path.read_text())
-assert record['schemaVersion'] == 6, (path, record['schemaVersion'])
-assert isinstance(record['toolchainFingerprint'], dict), path
-libraries = record['sharedLibraries']
-assert isinstance(libraries, list) and libraries and len(libraries) == len(set(libraries)), path
-for library in libraries:
-    artifact = path.parent / 'workspace/.lake/build' / library
-    assert artifact.is_file() and not artifact.is_symlink(), artifact
-outputs = record['artifacts']
-daemon = '.lake/build/bin/beam-daemon' + ('.exe' if os.name == 'nt' else '')
-expected = {daemon, '.lake/build/lib/' + beam_plugin_name,
-            *('.lake/build/' + library for library in libraries)}
-assert len(outputs) == len(expected) and {entry['source'] for entry in outputs} == expected, path
-assert all(entry['source'] == entry['destination'] for entry in outputs), path
-for entry in outputs:
-    output = path.parent / 'workspace' / entry['source']
-    assert output.is_file() and not output.is_symlink(), output
-    assert hashlib.sha256(output.read_bytes()).hexdigest() == entry['hash'], output
-PYCACHE
-    local workspace
-    workspace="$(dirname "$found")/workspace"
-    assert_file "$workspace/.lean-beam-bundle-workspace"
-    assert_file "$workspace/Beam.lean"
-    assert_file "$workspace/Beam/Broker/Server.lean"
-    assert_file "$workspace/Beam/LSP/Save.lean"
-    assert_file "$workspace/Beam/LSP/DiagnosticsBarrier.lean"
-    assert_file "$workspace/.lake/build/bin/beam-daemon"
-    assert_not_exists "$workspace/.lake/build/bin/beam-client"
-    assert_file "$workspace/.lake/build/lib/$beam_lsp_plugin_shared_lib"
-  done
 }
 
 run_install_from_source() {
@@ -603,7 +548,7 @@ assert_contains "$interactive_transcript" 'Write Locations'
 assert_contains "$interactive_transcript" 'Lean Beam will create or update the following locations:'
 assert_contains "$interactive_transcript" 'Command directory'
 assert_contains "$interactive_transcript" 'Runtime root'
-assert_contains "$interactive_transcript" 'Bundle cache'
+assert_not_contains "$interactive_transcript" 'Bundle cache'
 assert_contains "$interactive_transcript" 'Source build output'
 assert_contains "$interactive_transcript" 'Allow lean-beam to write to these locations?'
 assert_contains "$interactive_transcript" 'building beam runtime artifacts'
@@ -908,45 +853,24 @@ assert_not_exists "$CODEX_HOME"
 assert_not_exists "$CLAUDE_HOME"
 assert_not_exists "$PI_CODING_AGENT_DIR"
 assert_not_exists "$OPENCODE_CONFIG_DIR"
-assert_bundle_layout "$BEAM_INSTALL_ROOT/state/install-bundles" "$toolchain"
+assert_no_construction_state "$BEAM_INSTALL_ROOT"
 
-# Construction still protects an unmarked build workspace. Shipped execution has no
-# bundle-install command and cannot repair or extend its published component set.
-blocked_bundle_root="$tmp_root/blocked-bundles"
-rsync -a "$BEAM_INSTALL_ROOT/state/install-bundles/" "$blocked_bundle_root/"
-blocked_bundle_metadata="$(find "$blocked_bundle_root" -name metadata.json | sort | head -n 1)"
-if [ -z "$blocked_bundle_metadata" ]; then
-  echo "expected construction cache fixture metadata" >&2
-  exit 1
-fi
-blocked_bundle_workspace="$(dirname "$blocked_bundle_metadata")/workspace"
-printf 'sentinel\n' >"$blocked_bundle_workspace/user-file.txt"
-remove_tmp_file "$blocked_bundle_workspace/.lean-beam-bundle-workspace"
-remove_tmp_file "$blocked_bundle_workspace/.lake/build/lib/$beam_lsp_plugin_shared_lib"
-blocked_bundle_err="$(mktemp "$tmp_root/bundle-unmarked-workspace-XXXXXX")"
+# Construction builds every target from scratch inside its own staging tree. It refuses to reuse
+# or remove a construction directory it did not create.
 blocked_staging="$tmp_root/blocked-staging"
-mkdir "$blocked_staging"
+mkdir -p "$blocked_staging/.construction"
+printf 'sentinel\n' >"$blocked_staging/.construction/user-file.txt"
+blocked_construction_err="$(mktemp "$tmp_root/construction-existing-XXXXXX")"
 frontend_sdk="$(elan run "$toolchain" lean --print-prefix)"
 if "$source_checkout/.lake/build/bin/beam-install-runtime" construct "$source_checkout" \
-    "$frontend_sdk" "$blocked_staging" "$blocked_bundle_root" "${expected_source_commit:--}" "$toolchain" \
-    > /dev/null 2>"$blocked_bundle_err"; then
-  echo "expected construction to reject an unmarked existing workspace" >&2
+    "$frontend_sdk" "$blocked_staging" "${expected_source_commit:--}" "$toolchain" \
+    > /dev/null 2>"$blocked_construction_err"; then
+  echo "expected construction to reject an existing construction directory" >&2
   exit 1
 fi
-assert_contains "$blocked_bundle_err" 'construction cache failed verification'
-assert_file "$blocked_bundle_workspace/user-file.txt"
-assert_not_exists "$blocked_staging/manifest.json"
-# Without a ready record construction may build, but must still refuse an unmarked workspace.
-remove_tmp_file "$blocked_bundle_metadata"
-if "$source_checkout/.lake/build/bin/beam-install-runtime" construct "$source_checkout" \
-    "$frontend_sdk" "$blocked_staging" "$blocked_bundle_root" "${expected_source_commit:--}" "$toolchain" \
-    > /dev/null 2>"$blocked_bundle_err"; then
-  echo "expected construction to preserve an unmarked workspace without a ready record" >&2
-  exit 1
-fi
-assert_contains "$blocked_bundle_err" 'refusing to remove unmarked existing bundle workspace'
-remove_tmp_file "$blocked_bundle_err"
-assert_file "$blocked_bundle_workspace/user-file.txt"
+assert_contains "$blocked_construction_err" 'refusing to reuse an existing construction directory'
+remove_tmp_file "$blocked_construction_err"
+assert_file "$blocked_staging/.construction/user-file.txt"
 assert_not_exists "$blocked_staging/manifest.json"
 
 run_custom_toolchain_install_test() (
@@ -990,7 +914,7 @@ run_custom_toolchain_install_test() (
     "$custom_installed_payload_id" \
     "$expected_source_commit" \
     "$custom_toolchain"
-  assert_bundle_layout "$custom_install_root/state/install-bundles" "$custom_toolchain"
+  assert_no_construction_state "$custom_install_root"
 
   custom_project_root="$tmp_root/custom-project"
   rsync -a --exclude='.beam/' tests/save_olean_project/ "$custom_project_root"/
@@ -1014,7 +938,7 @@ run_custom_toolchain_install_test() (
 run_step "install custom toolchain runtime" run_custom_toolchain_install_test
 
 release_pre_all_validated_disk() {
-  remove_tmp_tree "$blocked_bundle_root"
+  remove_tmp_tree "$blocked_staging"
   remove_tmp_tree "$tmp_root/custom-elan"
   remove_tmp_tree "$tmp_root/custom-home"
   remove_tmp_tree "$tmp_root/custom-install-root"
@@ -1023,7 +947,14 @@ release_pre_all_validated_disk() {
 
 run_step "release install temp trees before all-validated" release_pre_all_validated_disk
 
-run_step "prebuild all validated bundles" run_install_from_source --all-validated
+run_step "install all validated targets" run_install_from_source --all-validated
+
+run_construction_native_test() (
+  cd "$source_checkout"
+  ELAN_HOME="$HOME/.elan" python3 tests/test-installation-construction-native.py
+)
+
+run_step "two-target construction, reuse, and failure fences" run_construction_native_test
 
 assert_version_count "$BEAM_INSTALL_ROOT/versions" 2
 all_targets_root="$(beam_test_realpath "$installed_runtime_root")"
@@ -1033,7 +964,7 @@ if [ "$all_targets_root" = "$installed_version_root" ]; then
   exit 1
 fi
 BEAM_INSTALL_LAYOUT_JSON="$install_layout_json" assert_manifest_metadata "$installed_runtime_root/manifest.json" "$all_targets_payload" "$expected_source_commit" ${validated_toolchains[@]+"${validated_toolchains[@]}"}
-assert_bundle_layout "$BEAM_INSTALL_ROOT/state/install-bundles" ${validated_toolchains[@]+"${validated_toolchains[@]}"}
+assert_no_construction_state "$BEAM_INSTALL_ROOT"
 
 rocq_no_target_err="$(mktemp "$tmp_root/rocq-skill-no-target-XXXXXX")"
 if (

@@ -56,8 +56,6 @@ with tempfile.TemporaryDirectory(prefix="beam-entrypoints-") as temporary:
         path.chmod(0o755)
     env = dict(os.environ, BEAM_HOME=str(foreign),
                BEAM_SESSION_ROOT=str(directory / "sessions"),
-               BEAM_BUNDLE_DIR=str(directory / "forbidden-runtime-cache"),
-               BEAM_INSTALL_BUNDLE_DIR=str(directory / "forbidden-install-cache"),
                PATH=str(foreign / "bin") + os.pathsep + os.environ["PATH"])
     cli_g = g / record["components"]["frontends"]["cli"]
     cli_h = h / record["components"]["frontends"]["cli"]
@@ -152,6 +150,4 @@ with tempfile.TemporaryDirectory(prefix="beam-entrypoints-") as temporary:
                     run(cli_h, "--root", str(project), "stop", env=env, cwd=project)
                     owner.wait(timeout=30)
     assert not marker.exists(), "a foreign component was invoked before rejection"
-    assert not (directory / "forbidden-runtime-cache").exists()
-    assert not (directory / "forbidden-install-cache").exists()
     print("shipped component restrictions, independently validated daemon identity, cross-installation rejection, and recovery passed")
