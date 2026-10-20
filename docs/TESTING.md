@@ -89,11 +89,32 @@ Current LSP coverage includes:
 - shuffled concurrent workload coverage in [tests/lean/BeamTest/LSP/Scenario/StressTest.lean](../tests/lean/BeamTest/LSP/Scenario/StressTest.lean)
 - handle API, restart, lifecycle, and nested-failure coverage in [tests/lean/BeamTest/LSP/Handle](../tests/lean/BeamTest/LSP/Handle)
 - full registered LSP request coverage through request-family tests under [tests/lean/BeamTest/LSP/Requests](../tests/lean/BeamTest/LSP/Requests), aggregated by [tests/lean/BeamTest/LSP/RequestSurfaceTest.lean](../tests/lean/BeamTest/LSP/RequestSurfaceTest.lean), including `$/lean/todo` and `$/lean/runAt` composition
+- auxiliary-declaration conformance in [AuxiliaryDeclarationTest.lean](../tests/lean/BeamTest/LSP/Requests/RunAt/AuxiliaryDeclarationTest.lean), comparing `runAt` with identical tactic replacements through ordinary LSP document edits, including private and nested proofs, stored-handle branches, and failure isolation
+- proof-context combinations in the same fixture: universe-polymorphic kernel `decide` and `grind`, rollback within `first`, local instances and dependent induction across handle branches, native computation, `conv` under binders, and bitvector solver success and counterexamples
+- available-goal execution in [AvailabilityTest.lean](../tests/lean/BeamTest/LSP/Requests/RunAt/AvailabilityTest.lean): a later tactic signals entry and waits on a gate; goal inspection and `runAt` must finish before that gate is released, with both synchronous and asynchronous elaboration
+- declaration-header universes in [HeaderUniverseTest.lean](../tests/lean/BeamTest/LSP/Requests/RunAt/HeaderUniverseTest.lean): synchronous proofs use universes absent from their goals and local types, including private, nested, mutual, and handle continuations; paired document edits also preserve Lean's asynchronous unused-universe rejection
 - search-style handle workflows in [tests/lean/BeamTest/LSP/Scenario/MctsProofSearchTest.lean](../tests/lean/BeamTest/LSP/Scenario/MctsProofSearchTest.lean)
 - parallel multi-sorry workflow coverage in [tests/lean/BeamTest/LSP/Scenario/ParallelGrindBatchTest.lean](../tests/lean/BeamTest/LSP/Scenario/ParallelGrindBatchTest.lean), which queries actionable todos with `$/lean/todo`, validates one `$/lean/runAt` request per returned item, and then mirrors those exact replacements in one atomic batched `didChange`
 - lightweight search-workload latency reporting in [tests/lean/BeamTest/LSP/Scenario/SearchWorkloadReport.lean](../tests/lean/BeamTest/LSP/Scenario/SearchWorkloadReport.lean) and [scripts/search-workload-report.sh](../scripts/search-workload-report.sh)
 
 Run the LSP surface when the change touches request semantics, proof-vs-command basis selection, positions, cancellation, handles, stale snapshots, per-request isolation, or any method in [Beam/LSP/Plugin.lean](../Beam/LSP/Plugin.lean).
+
+For proof-execution regressions, compare speculative execution with ordinary Lean elaboration of
+the same replacement. Assert the relevant effect as well as goal closure: the auxiliary-declaration
+fixture's `fresh_aux` tactic checks an actual declaration-set difference, so a cached lemma cannot
+hide a missing creation path. Its handle tests retain one lemma, create different lemmas after
+resuming, and check that failed attempts and sibling branches leave the original snapshot intact.
+Keep ordinary Lean's own rejection cases as controls; for example, `decide +kernel` rejects a goal
+containing free variables in both execution paths.
+
+The local-recursion tests deliberately distinguish tactic fragments from complete declarations.
+Valid tactic-local `let rec` fragments, including postponed terms and nested `have`/`refine` terms,
+must return an explicit unsupported diagnostic with unchanged goals and no successor handle. Their
+ordinary document replacements must elaborate successfully; a nonterminating control must fail
+ordinary Lean's termination check. Command probes must finalize valid recursion and reject the
+nonterminating declaration. A discarded recursive branch inside `first` must leave no pending
+definitions. The `postpone_exact` fixture tactic uses Lean's postponement API to ensure synthesis
+after tactic evaluation is covered by the same failure and restoration boundary.
 
 ## Beam Surface
 
