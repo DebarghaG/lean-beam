@@ -1321,7 +1321,7 @@ private def withShutdownObservedSession
       (match behavior with | .exit => "exit" | .stall => "stall")
     ]
   } fun child proc => do
-    let pending ← Std.Mutex.new ({} : Std.TreeMap Lean.JsonRpc.RequestID PendingRequest)
+    let pending ← PendingRequestStore.create
     let stderrCapture ← startBackendStderrCapture child.stderr
     act {
       workspaceId
@@ -1346,6 +1346,82 @@ private def awaitFixtureTask
   | some (.ok ()) => pure ()
   | some (.error err) => throw err
   | none => throw <| IO.userError s!"{label}: fixture task did not finish"
+
+private inductive LateWriteFailure where
+  | open
+  | closed
+  | cancelled
+  deriving BEq
+
+/-- A write admitted before closure must retain the channel's typed failure and cancellation. -/
+private def checkLateWriteFailure (kind : LateWriteFailure) : IO Unit := do
+  let base := System.FilePath.mk s!"/tmp/beam-late-write-failure-{← IO.monoNanosNow}"
+  let workspaceId := "late-write-failure"
+  IO.FS.createDirAll base
+  let runtime ← ServerRuntime.create { root := base } workspaceId
+  let failure := BrokerFailure.toResponseFailure {
+    code := .workerExited
+    message := "controlled channel failure before write error"
+    data? := some <| Json.mkObj [("source", toJson ("reader" : String))]
+  }
+  try
+    withShutdownObservedSession workspaceId base (base / "shutdown") .stall fun initial => do
+      let writes ← IO.mkRef (0 : Nat)
+      let admitted ← IO.mkRef false
+      let cancelled ← IO.mkRef false
+      let session := { initial with
+        stdin := { initial.stdin with putStr := fun text => do
+          if text.contains "\"method\":\"workspace/symbol\"" then
+            writes.modify (· + 1)
+            admitted.set (!(← PendingRequestStore.snapshot initial.pending).isEmpty)
+            if kind == .cancelled then
+              if let some active ← ActiveRequestRegistry.markCancelled runtime.activeRequests
+                  (some workspaceId) "late-write" then
+                cancelled.set (← active.cancelRef.get)
+            if kind != .open then
+              PendingRequestStore.close initial.pending failure
+            throw <| IO.userError "controlled broken pipe"
+          else initial.stdin.putStr text
+        }
+      }
+      runtime.state.atomically do
+        let state ← get
+        let some workspace := state.workspaces.get? workspaceId
+          | throw <| IO.userError "late-write fixture workspace is missing"
+        let workspace := { workspace with lean := { nextEpoch := 2, session? := some session } }
+        set { state with workspaces := state.workspaces.insert workspaceId workspace }
+      let task ← IO.asTask (prio := Task.Priority.dedicated) <| runtime.dispatchRequest {
+        workspaceId? := some workspaceId
+        clientRequestId? := some "late-write"
+        payload := .workspaceSymbols { query := "late-write" }
+      }
+      try
+        let some (.ok response) ← Beam.waitTaskWithTimeout task 3000
+          | throw <| IO.userError "late write failure left its caller blocked"
+        require "late write fixture fails an admitted request" ((← admitted.get) && (← writes.get) == 1)
+        match kind with
+        | .open =>
+            require "open-channel write errors retain their existing internal error"
+              (response.error?.any fun error =>
+                error.code == "internalError" && error.message.contains "controlled broken pipe")
+        | .closed =>
+            require "late write failure preserves the typed reader failure and data"
+              (response.error?.any fun error => toJson error == toJson failure.error)
+        | .cancelled =>
+            require "late write fixture marked the exact active cancellation identity" (← cancelled.get)
+            require "cancelled late write keeps cancellation precedence"
+              (response.error?.any (·.code == "requestCancelled"))
+        require "late write failure removes its pending request"
+          ((← PendingRequestStore.snapshot initial.pending).isEmpty)
+        let retained ← PendingRequestStore.failure? initial.pending
+        require "late write failure preserves channel admission state"
+          (if kind == .open then retained.isNone
+           else retained.any fun actual => toJson actual.error == toJson failure.error)
+      finally
+        PendingRequestStore.close initial.pending failure
+        discard <| IO.wait task
+  finally
+    try runtime.close finally IO.FS.removeDirAll base
 
 private inductive ShutdownReply where
   | success
@@ -1372,7 +1448,7 @@ private def checkShutdownReplyCleanup (reply : ShutdownReply) : IO Unit := do
         diagnosticsSeenRef := ← IO.mkRef false
         seenDiagnosticKeysRef := ← IO.mkRef {}
       }
-      PendingRequestStore.insert initial.pending 0 ordinary
+      discard <| PendingRequestStore.register initial.pending 0 ordinary
       let session := { initial with
         stdin := { initial.stdin with
           putStr := fun text => do
@@ -1550,7 +1626,7 @@ private def exitedSessionWithInheritedStdio
       done.toString
     ]
   }
-  let pending ← Std.Mutex.new ({} : Std.TreeMap Lean.JsonRpc.RequestID PendingRequest)
+  let pending ← PendingRequestStore.create
   let stderrCapture ← startBackendStderrCapture child.stderr
   let proc ← BackendProcess.create child.pid child.tryWait child.kill
   let some (.exited _) ← proc.waitForExit 1000
@@ -1720,8 +1796,8 @@ private def checkUnconfirmedCleanup
       }
       let ordinary ← cleanupPending
       let cancelled ← cleanupPending (some (← IO.mkRef true))
-      PendingRequestStore.insert session.pending 0 ordinary
-      PendingRequestStore.insert session.pending 99 cancelled
+      discard <| PendingRequestStore.register session.pending 0 ordinary
+      discard <| PendingRequestStore.register session.pending 99 cancelled
       runtime.state.atomically do
         let state ← get
         let some workspace := state.workspaces.get? workspaceId
@@ -1783,6 +1859,188 @@ private def checkUnconfirmedCleanup
           require "failed cleanup retains the committed removal"
             ((← runtime.workspaceRoot? workspaceId).isNone)
       | .readerFailure => pure ()
+  finally
+    try runtime.close catch _ => pure ()
+    IO.FS.removeDirAll base
+
+/-- Failed readers reject both captured and runtime requests without fencing a healthy backend. -/
+private def checkFailedReaderAdmission : IO Unit := do
+  let base := System.FilePath.mk s!"/tmp/beam-failed-reader-admission-{← IO.monoNanosNow}"
+  let failedId := "failed-reader"
+  let healthyId := "healthy-reader"
+  IO.FS.createDirAll base
+  let runtime ← ServerRuntime.create { root := base } failedId
+  try
+    let text := "def openedBeforeReaderFailure := 1\n"
+    let path := base / "Open.lean"
+    IO.FS.writeFile path text
+    let uri := sessionUri (← IO.FS.realPath path)
+    let doc := (DocumentState.FileSnapshot.ofText text default).toDocState 1
+    withShutdownObservedSession failedId base (base / "failed-shutdown") .stall fun initial => do
+      withShutdownObservedSession healthyId (base / "healthy") (base / "healthy-shutdown") .stall fun healthy => do
+        let exitCode ← IO.mkRef (none : Option UInt32)
+        let failedWrites ← IO.mkRef (0 : Nat)
+        let healthyRequests ← IO.mkRef (0 : Nat)
+        let cancelOnObserve ← IO.mkRef (none : Option String)
+        let observationCancelled ← IO.mkRef false
+        let closeAfterReply ← IO.mkRef false
+        let replyCancelled ← IO.mkRef false
+        -- Controlled operations leave the real child with the fixture's independent owner.
+        let process ← BackendProcess.create 0
+          (do
+            if let some clientRequestId ← cancelOnObserve.get then
+              if let some active ← ActiveRequestRegistry.markCancelled runtime.activeRequests
+                  (some failedId) clientRequestId then
+                observationCancelled.set (← active.cancelRef.get)
+            exitCode.get)
+          (throw <| IO.userError "controlled reader termination failure")
+        let failed := { initial with
+          proc := process
+          docs := initial.docs.insert uri doc
+          stdin := { initial.stdin with putStr := fun _ => failedWrites.modify (· + 1) }
+          stdout := { initial.stdout with
+            getLine := throw <| IO.userError "controlled admission reader failure"
+          }
+        }
+        let healthy := { healthy with
+          stdin := { healthy.stdin with putStr := fun text => do
+            unless text.contains "\"method\":\"workspace/symbol\"" do
+              throw <| IO.userError "unexpected healthy-backend fixture write"
+            healthyRequests.modify (· + 1)
+            let [_, body] := text.splitOn "\r\n\r\n"
+              | throw <| IO.userError "healthy-backend fixture expected a complete LSP frame"
+            let request ← IO.ofExcept <| Json.parse body
+            let id ← IO.ofExcept <| request.getObjValAs? Lean.JsonRpc.RequestID "id"
+            let some pending ← PendingRequestStore.remove healthy.pending id
+              | throw <| IO.userError "healthy-backend request was not registered"
+            PendingRequest.resolveResponse pending (Json.arr #[])
+            if ← closeAfterReply.get then
+              if let some active ← ActiveRequestRegistry.markCancelled runtime.activeRequests
+                  (some healthyId) "cancel-after-reply" then
+                replyCancelled.set (← active.cancelRef.get)
+              PendingRequestStore.close healthy.pending
+                (responseFailureFor .workerExited "controlled channel failure after reply")
+          }
+        }
+        match ← runtime.initWorkspaceWithConfig healthyId { root := base / "healthy" } with
+        | .ok _ => pure ()
+        | .error failure => throw <| IO.userError failure.error.message
+        runtime.state.atomically do
+          for session in #[failed, healthy] do
+            let state ← get
+            let some workspace := state.workspaces.get? session.workspaceId
+              | throw <| IO.userError "reader-admission fixture workspace is missing"
+            let session := { session with workspaceGeneration := workspace.generation }
+            let workspace := { workspace with lean := { nextEpoch := 2, session? := some session } }
+            set { state with workspaces := state.workspaces.insert session.workspaceId workspace }
+        let ordinary ← cleanupPending
+        require "reader-admission fixture registers ordinary pending work"
+          (← PendingRequestStore.register failed.pending 0 ordinary)
+        sessionReaderLoop failed
+        let some (some (.error failure)) ← Beam.waitTaskWithTimeout ordinary.promise.result? 1000
+          | throw <| IO.userError "reader failure did not settle admitted work"
+        require "reader failure retains its typed cause and incomplete cleanup"
+          (failure.error.code == "workerExited" &&
+            failure.error.message.contains "controlled admission reader failure" &&
+            failure.error.message.contains "backend process exit was not confirmed")
+        require "unconfirmed reader termination explains workspace recovery"
+          (failure.error.message.contains "drop this workspace" &&
+            failure.error.message.contains "lean-beam --root <workspace-root> stop" &&
+            failure.error.message.contains "lean-beam --root <workspace-root> serve")
+        require "failed-reader fixture still has unconfirmed process exit" ((← process.observe).isNone)
+        let lateTask ← IO.asTask (prio := Task.Priority.dedicated) <|
+          sendRequestJsonTrackedDetailed failed "textDocument/hover" Json.null
+        try
+          let some (.ok (.error actual)) ← Beam.waitTaskWithTimeout lateTask 1000
+            | throw <| IO.userError "failed reader admitted a request without a response consumer"
+          require "captured session retains the typed reader failure"
+            (toJson actual.error == toJson failure.error)
+        finally
+          PendingRequestStore.close failed.pending failure
+          discard <| IO.wait lateTask
+        -- A document close sends only a notification, so request registration cannot reject it.
+        let rejectedClose ← runtime.dispatchRequest {
+          workspaceId? := some failedId
+          payload := .close { path := "Open.lean" }
+        }
+        require "failed reader rejects notification-only close with the retained failure"
+          (rejectedClose.error?.any fun actual => toJson actual == toJson failure.error)
+        require "rejected notification-only close does not write" ((← failedWrites.get) == 0)
+        runtime.state.atomically do
+          let some session := (← get).workspaces.get? failedId |>.bind (·.lean.session?)
+            | throw <| IO.userError "rejected notification-only close detached the failed session"
+          require "rejected notification-only close preserves the opened document"
+            (session.docs.contains uri)
+        let rejected ← runtime.dispatchRequest {
+          workspaceId? := some failedId
+          payload := .workspaceSymbols { query := "failed" }
+        }
+        require "runtime rejects reuse with the original typed reader failure"
+          (rejected.error?.any fun actual => toJson actual == toJson failure.error)
+        -- Cancellation can be marked while observation holds the broker state mutex, before
+        -- cancellation forwarding can acquire that mutex. Both request kinds use the same policy.
+        for (clientRequestId, payload) in #[
+            ("cancel-query", RequestPayload.workspaceSymbols { query := "cancelled" }),
+            ("cancel-close", RequestPayload.close { path := "Open.lean" })
+          ] do
+          observationCancelled.set false
+          cancelOnObserve.set (some clientRequestId)
+          let cancelled ← runtime.dispatchRequest {
+            workspaceId? := some failedId
+            clientRequestId? := some clientRequestId
+            payload
+          }
+          cancelOnObserve.set none
+          require "process observation marked the exact active cancellation identity"
+            (← observationCancelled.get)
+          require "marked cancellation wins retained-channel rejection"
+            (cancelled.error?.any (·.code == "requestCancelled"))
+        let unmarked ← runtime.dispatchRequest {
+          workspaceId? := some failedId
+          payload := .workspaceSymbols { query := "unmarked" }
+        }
+        require "cancelled callers do not change the shared reader failure"
+          (unmarked.error?.any fun actual => toJson actual == toJson failure.error)
+        runtime.state.atomically do
+          let some session := (← get).workspaces.get? failedId |>.bind (·.lean.session?)
+            | throw <| IO.userError "cancelled close detached the failed session"
+          require "cancelled notification-only close preserves the opened document"
+            (session.docs.contains uri)
+        let answered ← runtime.dispatchRequest {
+          workspaceId? := some healthyId
+          payload := .workspaceSymbols { query := "healthy" }
+        }
+        let healthyRequestCount ← healthyRequests.get
+        require "reader failure leaves an unrelated active backend usable"
+          (answered.ok && healthyRequestCount == 1)
+        -- A backend reply can succeed before a later channel failure rejects broker finalization.
+        closeAfterReply.set true
+        let cancelledAfterReply ← runtime.dispatchRequest {
+          workspaceId? := some healthyId
+          clientRequestId? := some "cancel-after-reply"
+          payload := .workspaceSymbols { query := "answered-before-failure" }
+        }
+        require "reply fixture marked the active cancellation identity" (← replyCancelled.get)
+        require "later session validation uses the same channel-failure cancellation policy"
+          (cancelledAfterReply.error?.any (·.code == "requestCancelled"))
+        require "later validation follows a completed backend exchange" ((← healthyRequests.get) == 2)
+        let retained ← PendingRequestStore.failure? healthy.pending
+        require "later cancellation preserves the shared channel failure"
+          (retained.any fun actual => actual.error.code == "workerExited" &&
+            actual.error.message == "controlled channel failure after reply")
+        exitCode.set (some 0)
+        let recovered ← runtime.dispatchRequest {
+          workspaceId? := some failedId
+          payload := .close { path := "Open.lean" }
+        }
+        require "confirmed exit permits detachment of a failed reader" recovered.ok
+        runtime.state.atomically do
+          let some workspace := (← get).workspaces.get? failedId
+            | throw <| IO.userError "recovered reader-admission workspace is missing"
+          require "confirmed exit clears the failed session and advances its epoch"
+            (workspace.lean.session?.isNone && workspace.lean.nextEpoch == 3)
+        require "terminally rejected requests and retained exit never write to the failed channel"
+          ((← failedWrites.get) == 0)
   finally
     try runtime.close catch _ => pure ()
     IO.FS.removeDirAll base
@@ -1933,7 +2191,7 @@ private def checkDeadSessionCleanupReleasesStateMutex : IO Unit := do
     diagnosticsSeenRef := ← IO.mkRef false
     seenDiagnosticKeysRef := ← IO.mkRef {}
   }
-  PendingRequestStore.insert session.pending 0 cleanupPending
+  discard <| PendingRequestStore.register session.pending 0 cleanupPending
   runtime.state.atomically do
     let state ← get
     let targetWorkspace : WorkspaceState := {
@@ -2074,7 +2332,7 @@ private def checkExitedSessionCleanupFailure
         diagnosticsSeenRef := ← IO.mkRef false
         seenDiagnosticKeysRef := ← IO.mkRef {}
       }
-      PendingRequestStore.insert session.pending 0 pending
+      discard <| PendingRequestStore.register session.pending 0 pending
       runtime.state.atomically do
         let state ← get
         let some workspace := state.workspaces.get? workspaceId
@@ -2207,7 +2465,7 @@ private def pendingOnlySession
       exit.toString
     ]
   }
-  let pending ← Std.Mutex.new ({} : Std.TreeMap Lean.JsonRpc.RequestID PendingRequest)
+  let pending ← PendingRequestStore.create
   let stderrCapture ← startBackendStderrCapture proc.stderr
   pure {
     workspaceId
@@ -2226,8 +2484,13 @@ private partial def takePendingRequests
     (store : PendingRequestStore)
     (count : Nat)
     (tries : Nat := 200) : IO (Array PendingRequest) := do
-  if (← PendingRequestStore.snapshot store).size >= count then
-    PendingRequestStore.clear store
+  let entries ← PendingRequestStore.snapshotEntries store
+  if entries.size >= count then
+    let mut pending := #[]
+    for (id, _) in entries.take count do
+      if let some request ← PendingRequestStore.remove store id then
+        pending := pending.push request
+    pure pending
   else if tries == 0 then
     throw <| IO.userError s!"timed out waiting for {count} pending backend request(s)"
   else
@@ -2259,6 +2522,7 @@ private def checkCompletedRequestResetIsolation : IO Unit := do
   let config : BrokerConfig := { root := oldRoot }
   let runtime ← ServerRuntime.create config workspaceId
   let session ← pendingOnlySession workspaceId oldRoot exit
+  let documentHandle ← IO.mkRef (none : Option RequestHandle)
   runtime.state.atomically do
     let state ← get
     let some workspace := state.workspaces.get? workspaceId
@@ -2267,7 +2531,7 @@ private def checkCompletedRequestResetIsolation : IO Unit := do
       lean := { nextEpoch := 2, session? := some session }
     }
     set { state with workspaces := state.workspaces.insert workspaceId workspace }
-  let documentTask ← IO.asTask (prio := Task.Priority.dedicated) <| runtime.dispatchRequest {
+  let documentTask ← IO.asTask (prio := Task.Priority.dedicated) <| runtime.dispatchRequestWithHandle {
     payload := .runAt {
       path := "Demo.lean"
       version := 1
@@ -2276,32 +2540,42 @@ private def checkCompletedRequestResetIsolation : IO Unit := do
       text := "rfl"
     }
     workspaceId? := some workspaceId
-  }
+  } fun handle => do
+    documentHandle.set (some handle)
+    pure true
   let symbolsTask ← IO.asTask (prio := Task.Priority.dedicated) <| runtime.dispatchRequest {
     payload := .workspaceSymbols { query := "demo" }
     workspaceId? := some workspaceId
   }
   try
     let requests ← takePendingRequests session.pending 2
-    let resetTask ← IO.asTask (prio := Task.Priority.dedicated) <|
-      runtime.initWorkspaceWithConfig workspaceId { root := newRoot } (some .reset)
-    unless ← waitForWorkspaceRoot runtime workspaceId newRoot do
-      throw <| IO.userError "completed-reset workspace reset did not commit"
-    for request in requests do
-      PendingRequest.resolveResponse request (Json.mkObj [])
-    for (label, task) in [("document request", documentTask), ("workspace symbols", symbolsTask)] do
-      let response ← IO.ofExcept <| ← IO.wait task
-      require s!"{label}: an old-session result should be rejected after reset"
-        (response.error?.any fun err => err.code == "workerExited")
-    let shutdownRequests ← takePendingRequests session.pending 1
-    for request in shutdownRequests do
-      PendingRequest.resolveResponse request Json.null
-    IO.FS.writeFile exit "exit"
-    match ← IO.ofExcept <| ← IO.wait resetTask with
-    | .ok result =>
-        require "completed reset should invalidate the old session" result.invalidatedHandles
-    | .error failure =>
-        throw <| IO.userError s!"completed workspace reset failed: {failure.error.message}"
+    try
+      let resetTask ← IO.asTask (prio := Task.Priority.dedicated) <|
+        runtime.initWorkspaceWithConfig workspaceId { root := newRoot } (some .reset)
+      unless ← waitForWorkspaceRoot runtime workspaceId newRoot do
+        throw <| IO.userError "completed-reset workspace reset did not commit"
+      let some handle ← documentHandle.get
+        | throw <| IO.userError "completed-reset document request has no cancellation handle"
+      require "reset fixture marks cancellation before its successful backend reply" (← handle.cancel)
+      for request in requests do
+        PendingRequest.resolveResponse request (Json.mkObj [])
+      for (label, task) in [("document request", documentTask), ("workspace symbols", symbolsTask)] do
+        let response ← IO.ofExcept <| ← IO.wait task
+        require s!"{label}: an old-session result should be rejected after reset"
+          (response.error?.any fun err => err.code == "workerExited")
+      let shutdownRequests ← takePendingRequests session.pending 1
+      for request in shutdownRequests do
+        PendingRequest.resolveResponse request Json.null
+      IO.FS.writeFile exit "exit"
+      match ← IO.ofExcept <| ← IO.wait resetTask with
+      | .ok result =>
+          require "completed reset should invalidate the old session" result.invalidatedHandles
+      | .error failure =>
+          throw <| IO.userError s!"completed workspace reset failed: {failure.error.message}"
+    finally
+      -- These promises were removed from the store, so runtime closure cannot settle them.
+      for request in requests do
+        request.resolveFailure (responseFailureFor .internalError "completed-reset fixture cleanup")
   finally
     if !(← exit.pathExists) then
       IO.FS.writeFile exit "exit"
@@ -2446,6 +2720,9 @@ def main : IO Unit := do
   checkWorkspaceLifecycleProtocol
   checkFixtureChildCleanupOnFailure
   checkFixtureCleanupRejectsWaitFailure
+  checkLateWriteFailure .open
+  checkLateWriteFailure .closed
+  checkLateWriteFailure .cancelled
   checkShutdownReplyCleanup .timeout
   checkShutdownReplyCleanup .success
   checkShutdownReplyCleanup .error
@@ -2457,6 +2734,7 @@ def main : IO Unit := do
   checkUnconfirmedCleanup .runtimeClose .waitFailure
   checkUnconfirmedCleanup .readerFailure .signalFailure true
   checkUnconfirmedCleanup .readerFailure .waitFailure
+  checkFailedReaderAdmission
   checkUnconfirmedCleanup .reset .signalFailure
   checkUnconfirmedCleanup .drop .exitNotObserved
   checkLifecycleTeardownConcurrency

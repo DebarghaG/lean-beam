@@ -388,6 +388,13 @@ handle has been validated, never fall back to matching a reusable client request
 the `PendingRequest` as one value instead of separating its promise from its cancellation reference.
 Once that reference is marked, cancellation takes precedence over a concurrent backend failure;
 an already-completed backend success remains successful.
+The private workspace request context carries that reference through every operation phase. Handlers
+must not take a second cancellation argument. `RequestCancellation.backendFailure` interprets both
+failed pending outcomes and retained channel rejections for the caller, preserving file progress
+without changing the shared channel failure. It reads cancellation when interpreting failure, rather
+than recording which event happened first. Broker-generated validation and freshness failures keep
+their existing semantics. A successful backend reply still requires the broker's remaining identity,
+sync, and save-publication checks before the whole operation can succeed.
 After initialization, `sessionReaderLoop` is the backend session's only stdout reader. Shutdown
 replies use the same pending-request store and reader loop; do not add a second direct stdout read.
 
@@ -419,6 +426,20 @@ Cleanup observes the owner before the graceful LSP `shutdown`/`exit` handshake; 
 wait failure skips its writes and response wait. The handshake waits directly on its pending
 promise within a bound. Only a successful reply permits the `exit` notification and graceful exit
 wait; a timeout, failed reply, or failed write proceeds directly to process termination.
+The pending-request store also owns terminal channel failure. Reader failure closes admission and
+settles all admitted requests after its bounded cleanup attempt, retaining the original typed failure
+and cleanup context. Registration and closure share one mutex: a request racing closure is either
+admitted and settled by it, or rejected with that same failure before its request write. A request
+admitted before closure may still write afterward; closure does not cancel an in-progress write or
+serialize document notifications with failure publication. Session copies share this gate, and
+repeated closure retains the first failure. If an admitted write then fails and observes a closed
+store, it settles through that retained typed failure rather than replacing it with an I/O error.
+A session whose reader has failed cannot serve later requests even if its child is still running;
+workspace reset or removal remains available, and unrelated workspaces remain usable. Confirmed
+process exit still uses the existing detach-and-restart path. If reader failure leaves the process
+observed running, the retained failure tells the caller to drop the workspace or restart its owning
+session. For wrapper sessions, run `lean-beam --root <workspace-root> stop`, then start a new
+`lean-beam --root <workspace-root> serve` owner before retrying.
 Final cleanup explicitly settles remaining requests with `workerExited`
 and the retained process outcome, even when an inherited stdout pipe prevents reader EOF.
 After settling pending work and observing stderr completion, unconfirmed process exit is reported
