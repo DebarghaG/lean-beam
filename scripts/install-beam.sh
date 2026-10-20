@@ -468,13 +468,24 @@ symlink_target_text() {
   esac
 }
 
+# Canonical spelling of a path whose trailing components may not exist yet: resolve the nearest
+# existing directory physically (for example macOS's /tmp -> /private/tmp) and keep the rest.
+canonical_path_text() {
+  local parent="$1"
+  local suffix=""
+  while [ ! -d "$parent" ]; do
+    suffix="/$(basename "$parent")$suffix"
+    parent="$(dirname "$parent")"
+  done
+  parent="$(cd -P "$parent" && pwd)" || return 1
+  printf '%s%s\n' "$parent" "$suffix"
+}
+
 ensure_beam_symlink_or_absent() {
   local path="$1"
   local root="$2"
   local label="$3"
   local target=""
-  local parent=""
-  local suffix=""
   local canonical_root=""
   require_path_within "$path" "$root" "$label"
   if [ ! -e "$path" ] && [ ! -L "$path" ]; then
@@ -487,17 +498,11 @@ ensure_beam_symlink_or_absent() {
     die "refusing to replace non-Beam path at $path"
   fi
   target="$(symlink_target_text "$path")"
-  # Resolve directory aliases before checking ownership (for example macOS's
-  # /tmp -> /private/tmp). Missing members remain repairable, including a
-  # wrapper through a missing current generation. This checks ownership for
-  # replacing a launcher, not admission to execute the damaged installation.
-  parent="$target"
-  while [ ! -d "$parent" ]; do
-    suffix="/$(basename "$parent")$suffix"
-    parent="$(dirname "$parent")"
-  done
-  target="$(cd -P "$parent" && printf '%s%s\n' "$(pwd)" "$suffix")" || return 1
-  canonical_root="$(cd -P "$install_root" && pwd)" || return 1
+  # Resolve directory aliases before checking ownership. Missing members remain repairable,
+  # including a wrapper through a missing current generation or a deleted install root. This
+  # checks ownership for replacing a launcher, not admission to execute the damaged installation.
+  target="$(canonical_path_text "$target")" || return 1
+  canonical_root="$(canonical_path_text "$install_root")" || return 1
   require_path_within "$target" "$canonical_root" "$label target"
 }
 

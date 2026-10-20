@@ -48,6 +48,27 @@ case "${1:-all}" in
 esac
 
 case "${1:-all}" in
+  missing-root|all)
+    # After the install root is deleted, its launchers still point into it. They remain
+    # Beam-owned and replaceable; a launcher into some other missing directory does not.
+    (
+      set_install_root "$physical_root/alias/deleted-install"
+      rm -f "$bin_home/lean-beam"
+      ln -s "$install_root/current/bin/lean-beam" "$bin_home/lean-beam"
+      verify_publish_targets
+      rm "$bin_home/lean-beam"
+      ln -s "$physical_root/alias/elsewhere/current/bin/lean-beam" "$bin_home/lean-beam"
+      if (verify_publish_targets) >"$tmp_root/error" 2>&1; then
+        echo 'accepted a launcher outside a deleted install root' >&2
+        exit 1
+      fi
+      assert_contains_literal "$tmp_root/error" 'outside'
+      rm "$bin_home/lean-beam"
+    )
+    ;;
+esac
+
+case "${1:-all}" in
   failure|all)
     [ -L "$current_root" ] || ln -s "$old" "$current_root"
     # Observe the actual rename boundary, then inject a failed rename. It must
