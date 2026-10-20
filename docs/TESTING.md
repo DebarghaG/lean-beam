@@ -231,12 +231,22 @@ bytes and modification time. Pure document-state tests cover ordered acceptance 
 refused late progress; protocol and MCP projection tests retain committed failure evidence.
 
 The fast suite also runs [tests/test-lake-helper-lifetime.py](../tests/test-lake-helper-lifetime.py)
-against the actual staged daemon and a non-shipped helper client. It checks completed requests,
-abrupt helper exit with a live descendant, deadlines, cancellation, and parent death, then cancellation/drop and
+against the actual staged daemon and a non-shipped helper client. A fresh public `lean-beam serve`
+holds Lake evaluation behind a latch for over 31 seconds, then releases it and checks completed
+`sync` progress and save readiness. Before release, stderr must explain that configuration is
+loading while stdout contains no readiness result. CLI interruption and owner loss exercise cold-load cleanup.
+Normal stop must report acknowledged shutdown without a warning, and both stop and interruption
+must release the owner pipe without forced daemon termination. The foreground owner still has
+the same 15-second exit assertion.
+The fixture also checks completed requests, abrupt helper exit with a live descendant, explicit
+test deadlines, cancellation, and parent death, then cancellation/drop and
 EOF shutdown through both legacy and modern MCP. Save preparation is also cancelled with a
-retained document/backend after its Lake configuration changes. A stalled configuration records helper and
+retained document/backend after its Lake configuration changes; one modern MCP case holds that
+helper for over 31 seconds before cancelling it. Independent CLI and MCP cases run concurrently
+so these real-time checks overlap. A stalled configuration records helper and
 descendant PIDs before cancellation, so an unrelated early error cannot satisfy the test. The
-external watchdog remains independent of the production helper deadline. Run this fixture on
+external watchdog remains independent of the trace-writing helper's production deadline; loading
+the server environment and preparing a save have no fixed deadline. Run this fixture on
 Windows and macOS as well as Linux when changing the native process-job implementation. Native
 toolchain qualification invokes the same fixture with `--native-prefix` against the relocated SDK
 and checks both native C objects when switching compilers through the isolated native build cache.

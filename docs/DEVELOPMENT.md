@@ -463,11 +463,19 @@ workspace state. Keep this acquisition bracket intact so runtime closure never h
 unowned provisional process.
 
 Target-built Lake helpers evaluate project configuration outside the frontend's Lean runtime.
-Each helper request owns one child, a 30-second monotonic deadline, and the broker request's
-cancellation flag. Request and response JSON use a private temporary directory with bounded
+Each helper request owns one child and observes the broker request's cancellation flag. Loading
+the server environment and preparing a save have no fixed response deadline: both evaluate Lake
+workspace configuration, which can take longer than 30 seconds. Save-trace publication retains a
+30-second monotonic response deadline. This policy does not change daemon readiness or backend initialization
+deadlines. Request and response JSON use a private temporary directory with bounded
 message size; project stdout/stderr do not carry protocol data. A completed response is published
 atomically before the owner terminates and reaps the helper. Cancellation and deadline failure
-also terminate and reap it before returning a typed broker failure.
+also terminate and reap it before returning a typed broker failure. Owner loss terminates the
+helper even during an unbounded server-environment wait. A cold load still holds the broker state
+mutex; removing its deadline does not provide concurrent workspace loading. MCP workspace drop
+remains a stream-order fence: cancel an earlier stalled request before awaiting drop.
+The typed operation wrappers select this policy without a caller override. The internal
+`LakeHelperJob.runRequest` primitive accepts an explicit policy for bounded lifetime fixtures.
 
 The helper waits for an owner handshake before binding its installation or evaluating project
 code. One process-job scope owns assignment, observation, termination, and the final child wait.
@@ -475,6 +483,14 @@ Its caller receives an observation capability rather than maintaining a separate
 Observation and teardown are serialized: loss of child ownership is permanent, and a capability
 retained past teardown rejects observation before touching the old PID. The caller must not wait
 or kill the raw child separately. Native failures retain their OS error code in `IO.Error`.
+
+The CLI detaches the daemon's stdin writer immediately after spawning it. Published child handles
+therefore cannot retain that writer; one shared reference owns it until foreground-owner cleanup
+clears the reference and sends EOF. Taking stdin only during cleanup would leave aliases of the
+original child keeping the pipe open. Forced termination uses the existing native child/group
+signalling operation, so it does not depend on detached child handles retaining `setsid` metadata.
+A forced owner cleanup emits a stderr diagnostic; ordinary stop and interruption must exit without
+that fallback. Exit observation and bounded collection still belong to the CLI owner.
 Windows uses `Child.tryWait` on the retained process handle without collecting the child. It
 assigns a non-inheritable kill-on-close Job Object before the handshake; successful job closure requests
 termination of its members, so cleanup waits on the retained child handle without another kill. Failed

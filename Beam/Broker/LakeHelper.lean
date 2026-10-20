@@ -72,9 +72,22 @@ def LakeHelperOperation.ofString? : String → Option LakeHelperOperation
   | "write-save-trace" => some .writeSaveTrace
   | _ => none
 
+/-- Lake loading follows its request owner; trace publication retains a bounded response wait. -/
+inductive LakeHelperWaitPolicy where
+  | cancellable
+  | timeout (milliseconds : Nat)
+  deriving BEq, Repr
+
+def LakeHelperOperation.waitPolicy : LakeHelperOperation → LakeHelperWaitPolicy
+  | .serverEnv | .prepareSave => .cancellable
+  | .writeSaveTrace => .timeout 30000
+
 structure LakeHelperControl where
   cancelRef? : Option (IO.Ref Bool) := none
-  timeoutMs : Nat := 30000
+
+private structure HelperDeadline where
+  timeoutMs : Nat
+  expiresAtMs : Nat
 
 namespace LakeHelperJob
 
@@ -111,31 +124,32 @@ private def cancelledHelper : BrokerFailure := {
   code := .requestCancelled, message := "target Lake helper request cancelled"
 }
 
-private def helperInterruption? (control : LakeHelperControl) (deadline : Nat) :
+private def helperInterruption? (control : LakeHelperControl) (deadline? : Option HelperDeadline) :
     IO (Option BrokerFailure) := do
   if ← helperCancelled control then return some cancelledHelper
-  if (← IO.monoMsNow) >= deadline then
-    return some {
-      code := .internalError
-      message := s!"target Lake helper timed out after {control.timeoutMs} ms"
-    }
+  if let some deadline := deadline? then
+    if (← IO.monoMsNow) >= deadline.expiresAtMs then
+      return some {
+        code := .internalError
+        message := s!"target Lake helper timed out after {deadline.timeoutMs} ms"
+      }
   pure none
 
 private partial def awaitHelperResponse
     (scope : Beam.ProcessJob.Scope)
     (directory : System.FilePath)
     (control : LakeHelperControl)
-    (deadline : Nat) : IO (Except BrokerFailure Response) := do
-  if let some failure ← helperInterruption? control deadline then return .error failure
+    (deadline? : Option HelperDeadline) : IO (Except BrokerFailure Response) := do
+  if let some failure ← helperInterruption? control deadline? then return .error failure
   let responsePath := LakeHelperJob.responsePath directory
   if ← responsePath.pathExists then
     let response ← IO.ofExcept <| fromJson? (← LakeHelperJob.readJson responsePath)
-    if let some failure ← helperInterruption? control deadline then return .error failure
+    if let some failure ← helperInterruption? control deadline? then return .error failure
     return .ok response
   match ← scope.poll with
   | .running =>
       IO.sleep 10
-      awaitHelperResponse scope directory control deadline
+      awaitHelperResponse scope directory control deadline?
   | .exited =>
       pure <| .error {
         code := .workerExited, message := "target Lake helper exited before completing its response"
@@ -145,16 +159,25 @@ private partial def awaitHelperResponse
         code := .internalError, message := "target Lake helper child ownership was lost"
       }
 
-/-- Execute one request against an already admitted helper, retaining ownership through reaping. -/
-def runLakeHelperRequest [ToJson α] [FromJson β]
+namespace LakeHelperJob
+
+/-- Internal owned-job primitive. Explicit wait policies support bounded fixture requests;
+production callers use the typed operation wrappers below. -/
+def runRequest [ToJson α] [FromJson β]
     (helper : System.FilePath)
     (operation : LakeHelperOperation)
     (request : α)
+    (waitPolicy : LakeHelperWaitPolicy)
     (control : LakeHelperControl := {}) : IO (Except BrokerFailure β) := do
   let response ←
     try
       if ← helperCancelled control then return .error cancelledHelper
-      let deadline := (← IO.monoMsNow) + control.timeoutMs
+      let deadline? : Option HelperDeadline ← match waitPolicy with
+        | .cancellable => pure none
+        | .timeout milliseconds => pure <| some {
+            timeoutMs := milliseconds
+            expiresAtMs := (← IO.monoMsNow) + milliseconds
+          }
       IO.FS.withTempDir fun temporary => do
         let directory := temporary / "job"
         Beam.ensurePrivateDir "target Lake helper job directory" directory
@@ -166,11 +189,11 @@ def runLakeHelperRequest [ToJson α] [FromJson β]
           setsid := true
         }
         Beam.ProcessJob.withChild child fun scope => do
-          if let some failure ← helperInterruption? control deadline then return .error failure
+          if let some failure ← helperInterruption? control deadline? then return .error failure
           -- The helper cannot evaluate project code until its Windows job is assigned.
           child.stdin.putStr "go\n"
           child.stdin.flush
-          awaitHelperResponse scope directory control deadline
+          awaitHelperResponse scope directory control deadline?
     catch error =>
       return .error {
         code := .internalError
@@ -197,6 +220,15 @@ def runLakeHelperRequest [ToJson α] [FromJson β]
               s!"target Lake helper '{operation.key}' returned unknown error code '{error.code}'"
           }
       pure <| .error { code, message := error.message, data? := error.data? }
+
+end LakeHelperJob
+
+private def runLakeHelperRequest [ToJson α] [FromJson β]
+    (helper : System.FilePath)
+    (operation : LakeHelperOperation)
+    (request : α)
+    (control : LakeHelperControl := {}) : IO (Except BrokerFailure β) :=
+  LakeHelperJob.runRequest helper operation request operation.waitPolicy control
 
 /-- Ask the target-built helper for the Lean server environment. -/
 def runLakeHelperServerEnv

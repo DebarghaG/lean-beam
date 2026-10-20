@@ -207,6 +207,7 @@ private def serveProject
   withProjectDaemonOwner runtime.resolve root
       (explicitControlDir? := opts.explicitControlDir?) fun owner =>
     runThenHoldUntilInterrupted owner do
+      IO.eprintln "beam: loading Lake workspace configuration..."
       callBrokerQuiet root owner.client <| Request.ensure
       printResponse <| Response.success <| toJson <|
         mkSessionStatus .running root owner.client.controlDir (some owner.generation)
