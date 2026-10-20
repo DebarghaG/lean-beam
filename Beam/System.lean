@@ -42,10 +42,11 @@ private opaque createPrivateDir (path : @& String) : IO Unit
 
 inductive PrivateDirIssue where
   | posixMode (mode : UInt32)
+  | posixOwner
   | windowsDacl
   deriving BEq, Repr
 
-/-- Classification of one exact directory leaf without following a final symbolic link. -/
+/-- Classification of an exact directory leaf under Beam's current per-user private-directory policy. -/
 inductive PrivateDirObservation where
   | absent
   | privateDir
@@ -66,6 +67,8 @@ def PrivateDirObservation.problem : PrivateDirObservation → Option String
       some "the Windows DACL must use ordinary allow entries, grant full access to the current user, and grant no access to other ordinary accounts"
   | .nonPrivate (.posixMode mode) =>
       some s!"existing mode is {permissionModeText mode}, expected 0700"
+  | .nonPrivate .posixOwner =>
+      some "the directory is not owned by the current effective user"
   | .notDirectory => some "the path is not a directory"
 
 /-- Inspect an exact directory leaf without following its final symbolic link. -/
@@ -78,6 +81,7 @@ def observePrivateDir (dir : System.FilePath) : IO PrivateDirObservation := do
   | 3 => pure .notDirectory
   | 4 => pure <| .nonPrivate (.posixMode mode)
   | 5 => pure <| .nonPrivate .windowsDacl
+  | 6 => pure <| .nonPrivate .posixOwner
   | _ => throw <| IO.userError s!"invalid native private-directory observation: {tag}"
 
 /-- Create only the missing leaf, private from creation; never create parents or repair a leaf. -/
@@ -89,7 +93,8 @@ def preparePrivateDirLeaf (dir : System.FilePath) : IO PrivateDirObservation := 
 Create a missing private directory leaf, or observe an existing leaf without changing it.
 
 The new leaf has mode `0700` (subject to umask) or a private Windows DACL at creation.
-A concurrent or pre-existing path is returned as observed without changing its permissions.
+An accepted POSIX leaf must belong to the current effective user.
+A concurrent or pre-existing path is returned as observed without changing ownership or permissions.
 Failed observation does not authorize removing a path that may have been replaced.
 -/
 def preparePrivateDir (dir : System.FilePath) : IO PrivateDirObservation := do
@@ -111,7 +116,8 @@ def requirePrivateDir
       throw <| IO.userError <|
         s!"unsafe {label} {dir}: {problem}. Select a dedicated directory that is a real " ++
           (if System.Platform.isWindows then "directory with a private Windows DACL"
-           else "directory with mode 0700") ++ "; Beam does not change permissions on existing paths"
+           else "directory owned by the current effective user with mode 0700") ++
+          "; Beam does not change ownership or permissions on existing paths"
 
 /-- Create a missing private leaf or validate an existing one without adopting it. -/
 def ensurePrivateDir (label : String) (dir : System.FilePath) : IO Unit := do

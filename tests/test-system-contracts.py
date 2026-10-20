@@ -6,6 +6,7 @@
 import csv
 import os
 from pathlib import Path
+import stat
 import subprocess
 import tempfile
 
@@ -32,7 +33,30 @@ def directory_link(path, target):
 def permissions(path):
     if os.name == "nt":
         return run(["icacls", path]).stdout
-    return path.stat().st_mode
+    info = path.stat()
+    return info.st_mode, info.st_uid, info.st_gid
+
+
+def inspect_foreign_owner():
+    # Observe an existing OS-owned directory; no privileged setup or ownership changes.
+    # Prefer a 0700 leaf to demonstrate that mode alone does not establish privacy.
+    candidates = []
+    for path in [Path("/root"), Path("/var/root"), Path("/")]:
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISDIR(info.st_mode) and info.st_uid != os.geteuid():
+            candidates.append((path, info))
+    assert candidates, "ownership regression needs an existing foreign-owned directory"
+    path, before = min(candidates, key=lambda item: stat.S_IMODE(item[1].st_mode) != 0o700)
+    print(run([COMMAND, "foreign-owner", path]).stdout, end="")
+    after = path.lstat()
+    # The OS account may use its directory concurrently; check the leaf's identity/access policy.
+    fields = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid")
+    assert all(getattr(before, field) == getattr(after, field) for field in fields), path
+    print(f"foreign-owner fixture: {path}, uid={before.st_uid}, "
+          f"euid={os.geteuid()}, mode={stat.S_IMODE(before.st_mode):04o}")
 
 
 def main():
@@ -81,6 +105,8 @@ def main():
             assert before == {path: permissions(path) for path in before}
             assert (root / "file").read_bytes() == b"ordinary file"
             assert not missing_target.exists(), "a dangling link's target was recreated"
+            if os.name != "nt":
+                inspect_foreign_owner()
         finally:
             if os.name == "nt":
                 # Restore the fixture's deletion rights before TemporaryDirectory cleanup.

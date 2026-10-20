@@ -10,11 +10,14 @@ Author: Emilio J. Gallego Arias
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#if !defined(_WIN32)
+#include <unistd.h>
+#endif
 
 /* Kept private to Beam.System: mode is meaningful only for PRIVATE_POSIX_MODE. */
 enum private_dir_kind {
   PRIVATE_ABSENT, PRIVATE_DIRECTORY, PRIVATE_LINK, PRIVATE_NOT_DIRECTORY,
-  PRIVATE_POSIX_MODE, PRIVATE_WINDOWS_DACL
+  PRIVATE_POSIX_MODE, PRIVATE_WINDOWS_DACL, PRIVATE_POSIX_OWNER
 };
 
 static lean_obj_res observation(enum private_dir_kind kind, uint32_t mode) {
@@ -201,6 +204,7 @@ LEAN_EXPORT lean_obj_res lean_beam_observe_private_dir(b_lean_obj_arg path, lean
   }
   if (S_ISLNK(status.st_mode)) return observation(PRIVATE_LINK, 0);
   if (!S_ISDIR(status.st_mode)) return observation(PRIVATE_NOT_DIRECTORY, 0);
+  if (status.st_uid != geteuid()) return observation(PRIVATE_POSIX_OWNER, 0);
   uint32_t mode = (uint32_t)(status.st_mode & 0777);
   return mode == 0700 ? observation(PRIVATE_DIRECTORY, 0) : observation(PRIVATE_POSIX_MODE, mode);
 #endif
