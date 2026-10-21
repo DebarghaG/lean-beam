@@ -9,6 +9,7 @@ import random
 import sys
 import time
 import unittest
+from unittest.mock import AsyncMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.beam_pool.scheduler import Pool, steal_count
@@ -193,6 +194,30 @@ class PoolTest(unittest.IsolatedAsyncioTestCase):
 
 
 class LspTest(unittest.IsolatedAsyncioTestCase):
+    async def test_open_reports_fatal_setup_errors_without_rebuilding(self):
+        client = object.__new__(Lsp)
+        client.notify = AsyncMock()
+        client.call = AsyncMock(return_value={"hasFatalSnapshot": True, "saveReadiness": {
+            "currentDiagnostics": [{"message": "Failed to load the Lake workspace"}],
+        }})
+        path = Path(__file__).resolve().parent / "scenario/docs/SimpleProof.lean"
+        with self.assertRaisesRegex(RuntimeError, "Failed to load the Lake workspace"):
+            await client.open(path)
+        self.assertEqual(client.notify.call_args_list[0].args[1]["dependencyBuildMode"], "never")
+        self.assertEqual(client.notify.call_args_list[-1].args[0], "textDocument/didClose")
+        # Ordinary proof errors must not prevent checking candidates in the document.
+        client.call.return_value["hasFatalSnapshot"] = False
+        self.assertEqual((await client.open(path))["uri"], path.as_uri())
+
+    async def test_cancelled_open_closes_unadmitted_document(self):
+        client = object.__new__(Lsp)
+        client.notify = AsyncMock()
+        client.call = AsyncMock(side_effect=asyncio.CancelledError())
+        path = Path(__file__).resolve().parent / "scenario/docs/SimpleProof.lean"
+        with self.assertRaises(asyncio.CancelledError):
+            await client.open(path)
+        self.assertEqual(client.notify.call_args_list[-1].args[0], "textDocument/didClose")
+
     async def test_server_and_client_request_ids_are_independent(self):
         class Writer:
             def write(self, data):

@@ -269,7 +269,7 @@ class Worker:
             if not isinstance(error, asyncio.CancelledError):
                 try:
                     detail = error.error if isinstance(error, RpcError) else {
-                        "code": "workerRejected", "message": str(error),
+                        "code": "workerRejected", "message": str(error) or type(error).__name__,
                     }
                     await write_frame(writer, {"generation": self.generation, "error": detail})
                 except (ConnectionError, OSError):

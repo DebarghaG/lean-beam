@@ -5,6 +5,10 @@ upstream Lean Beam implementation, using the existing `runAt`, `runWith`, and ha
 semantics. The coordinator is a small Python library; workers communicate over TCP and call Beam's
 LSP plugin. The installed CLI and MCP interfaces continue to use the local broker.
 
+A limited `beam-bench` replay passes locally, but exporting the first tested corpus proof currently
+stalls in its elaboration environment. Corpus migration remains blocked; see the
+[corpus sanity check](#corpus-sanity-check) below.
+
 ## State transfer
 
 Beam retains the complete core, meta, term, and tactic state. Export uses Lean's
@@ -65,6 +69,9 @@ durable recovery, exactly-once execution, or consensus.
 
 Build the plugin for the project's exact Lean toolchain. Run each worker in that project's `lake env`
 with immutable source and build artifacts. The worker emits its chosen port and generation as JSON.
+Document opening disables Lake dependency builds and reports fatal setup diagnostics. Prepare all
+imports before starting workers. Docker workers need Git for Lake's dependency inspection; when
+mounting an existing checkout, run with its owner's UID/GID to preserve Git ownership checks.
 
 ```bash
 lake build Beam.LSP:shared
@@ -168,3 +175,37 @@ These are correctness checks and a synthetic scheduling experiment. They do not 
 Greenbeam corpus, establish cross-machine WAN performance, or provide an MLSys evaluation. Real
 search traces, larger imported environments, skewed task durations, and heterogeneous workers need
 separate measurements before making those claims.
+
+## Corpus sanity check
+
+The [2026-10-21 corpus report](benchmarks/snapshot-corpus-sanity-2026-10-21.json) samples four
+three-step proofs from two `PrimeNumberTheoremAnd` files in `beam-bench/work/tasks.json`, using
+Lean 4.33.1 and two Docker workers. It replays the exact saved steps against the original source
+positions, with read-only project mounts. Each state also checks `simp` and `linarith`.
+
+Both pinned and stealing-enabled replay solved all four proofs and accepted all 12 original steps.
+All 36 candidate outcomes agreed, including 11 rejected alternatives. The small sibling batches
+stayed local, with zero exports or imports. Warm replay took 1.961 s and 1.688 s, respectively;
+this single ordered run does not establish a speedup.
+
+An explicit migration check failed before sending a snapshot: export of the initial handle for
+`meisselMertensConstant_identity` exceeded the worker's 120-second request deadline. A separate
+30-second diagnostic probe serialized the core context and checked kernel environment, then stalled
+while serializing the complete elaboration environment. The exact retained object responsible is
+not yet identified. The diagnostic build was temporary; the production snapshot representation was
+not changed. Successful local replay therefore does not establish transfer support for this corpus.
+
+To reproduce with the prepared corpus and a Beam plugin built for its exact toolchain:
+
+```bash
+python3 tests/benchmark-snapshot-corpus.py \
+  --corpus /path/to/beam-bench/work/tasks.json \
+  --project /path/to/beam-bench/projects/PrimeNumberTheoremAnd \
+  --runtime /path/to/lean-beam-built-for-4.33.1 \
+  --output /tmp/beam-corpus-sanity
+```
+
+The default phases are pinned replay, explicit migration, and stealing-enabled replay. Use
+`--phases pinned stealing` to run the passing replay comparison separately, or
+`--phases migration --limit 1` for the bounded export reproduction. The harness writes a report and
+worker logs even when a phase fails, and never overwrites an existing output directory.

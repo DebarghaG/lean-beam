@@ -121,10 +121,21 @@ class Lsp:
 
     async def open(self, path: Path):
         document = {"uri": path.as_uri(), "version": 1}
-        await self.notify("textDocument/didOpen", {"textDocument": {
+        await self.notify("textDocument/didOpen", {"dependencyBuildMode": "never", "textDocument": {
             **document, "languageId": "lean4", "text": path.read_text(),
         }})
-        await self.call("$/beam/waitForDiagnostics", {"uri": document["uri"], "version": 1})
+        try:
+            ready = await self.call("$/beam/waitForDiagnostics", {"uri": document["uri"], "version": 1})
+            if ready["hasFatalSnapshot"]:
+                diagnostics = ready["saveReadiness"]["currentDiagnostics"]
+                raise RuntimeError("Lean document setup failed: " +
+                                   "\n".join(item["message"] for item in diagnostics))
+        except BaseException:
+            try:
+                await self.notify("textDocument/didClose", {"textDocument": document})
+            except (ConnectionError, OSError):
+                pass  # Preserve the original failure when the transport has closed.
+            raise
         return document
 
     async def close(self):

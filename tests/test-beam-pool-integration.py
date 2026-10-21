@@ -48,6 +48,7 @@ class Cluster:
                 sdk = "/opt/lean"
                 subprocess.run([
                     "docker", "run", "--rm", "-d", "--name", name,
+                    "--user", f"{os.getuid()}:{os.getgid()}",
                     "--cpus", "2", "--memory", "3g", "--pids-limit", "256",
                     "-p", "127.0.0.1::8765", "-e", "BEAM_POOL_TOKEN",
                     "-e", f"PATH={sdk}/bin:/usr/local/bin:/usr/bin:/bin",

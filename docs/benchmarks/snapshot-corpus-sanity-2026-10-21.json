@@ -1,0 +1,99 @@
+{
+  "beamCommit": "cd883b3dd00d86d30d902f78f21b492ede9ee333",
+  "projectCommit": "55270df807213fc3584523d09e0311d7dc073ff5",
+  "toolchain": "leanprover/lean4:v4.33.1",
+  "corpusSha256": "de639d6059e682c20f515120bb11179b5d43f824867fd39933153def70dd763c",
+  "sources": {
+    "PrimeNumberTheoremAnd/IEANTN/RosserSchoenfeld/RosserSchoenfeldPrime.lean": "d1f0ebb4c5b382440b88d2e8896bb6b94cc5bdb09f8b333e7f3d231c84682c4a",
+    "PrimeNumberTheoremAnd/IEANTN/KadiriSupport.lean": "7b0d95eba060b24a05d60c470c8b00802cdda4832c2c384dca7875652bbf7302"
+  },
+  "pluginSha256": "5bccb0fa9ad87f1ee9f8d41f142ac7758df0f8e2c99ada5e97bbe4416613d08c",
+  "workers": 2,
+  "cpusPerWorker": 2,
+  "memoryGiBPerWorker": 8,
+  "images": [
+    "sha256:dda4ac2998d4e67459d459af4be2a85b6374a465a33afbdca6d0fcc615c79f50",
+    "sha256:ff57af4c940a21b991fd7b233ba8b9ba3843dfad89a40f6cba73f011c0f5cc44"
+  ],
+  "selectedTasks": [
+    "meisselMertensConstant_identity",
+    "eq_419",
+    "kadiri_laplace_neg_line_weight_bounded_of_continuous",
+    "kadiri_laplace_neg_line_weight_deriv"
+  ],
+  "runtime": "2d73d841ee59d66f2ff7fc7987f069e1644a9e172f783fb30b6912e7c310ffce",
+  "openSeconds": 30.507821655017324,
+  "corpus": "beam-bench/work/tasks.json",
+  "scope": {
+    "projects": 1,
+    "files": 2,
+    "proofs": 4,
+    "steps": 12,
+    "candidatesPerMode": 36
+  },
+  "replayPassed": true,
+  "candidateOutcomeAgreement": {
+    "matched": 36,
+    "total": 36
+  },
+  "runs": [
+    {
+      "stealing": false,
+      "seconds": 1.9605553220026195,
+      "metrics": {
+        "exports": 0,
+        "imports": 0,
+        "steals": 0,
+        "stolenJobs": 0,
+        "transferBytes": 0,
+        "transferSeconds": 0.0,
+        "copyFailures": 0,
+        "completedByWorker": [
+          40,
+          0
+        ]
+      },
+      "proofsSolved": 4,
+      "originalStepsAccepted": 12,
+      "candidatesAccepted": 25,
+      "candidatesRejected": 11
+    },
+    {
+      "stealing": true,
+      "seconds": 1.6881216149777174,
+      "metrics": {
+        "exports": 0,
+        "imports": 0,
+        "steals": 0,
+        "stolenJobs": 0,
+        "transferBytes": 0,
+        "transferSeconds": 0.0,
+        "copyFailures": 0,
+        "completedByWorker": [
+          10,
+          30
+        ]
+      },
+      "proofsSolved": 4,
+      "originalStepsAccepted": 12,
+      "candidatesAccepted": 25,
+      "candidatesRejected": 11
+    }
+  ],
+  "migration": {
+    "passed": false,
+    "attemptedProof": "meisselMertensConstant_identity",
+    "completedTransfers": 0,
+    "stage": "export of initial proof handle",
+    "workerRequestTimeoutSeconds": 120,
+    "diagnosticExportTimeoutSeconds": 30,
+    "diagnostic": "Core context and checked kernel environment serialized. Serialization of the complete elaboration environment stalled. The precise retained object causing the stall has not been identified."
+  },
+  "notes": [
+    "Both modes ran after opening the same files; pinned mode ran first. Single-run timings do not establish speedup.",
+    "All three candidate checks at each step stayed on the worker holding the parent. No successful migration is claimed.",
+    "The project was mounted read-only. Source SHA-256 hashes were unchanged.",
+    "The Docker setup fixes add Git, match the host UID for repository ownership, disable dependency builds, and surface fatal setup diagnostics.",
+    "The native field-level probe ran only in a temporary diagnostic build, which was restored afterward."
+  ]
+}
