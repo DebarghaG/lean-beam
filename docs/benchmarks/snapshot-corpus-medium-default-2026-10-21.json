@@ -1,0 +1,1945 @@
+{
+  "beamCommit": "0a09517574636aab260e2c8dc7f24dbc7b10e950",
+  "runnerSha256": "806430dc57e44de4da60825053966d145ebdeb3567fbc4d01b9ea543aee1aab2",
+  "workerSourcesSha256": {
+    "scripts/beam_pool/__init__.py": "f5a7d09e594ad1f95193bce24f33d7819f1eaf56520df87c65c42e7b01ca53bd",
+    "scripts/beam_pool/__main__.py": "4f632913635ea715b56dbd0b5dcf59beb2bf958ddb75703aa7ed5faee5bcbd2a",
+    "scripts/beam_pool/lsp.py": "43bf03cab80ceb54414c4c598064e083600d39a8c3bac7e59415b5c8036aa4d0",
+    "scripts/beam_pool/scheduler.py": "dfe9fa74b15f15e04f7ec7ca633ba5d4c4218cb13442301733f48f7db0540e75",
+    "scripts/beam_pool/wire.py": "b1b32673d63f3d4a1361c0bcde7a135969e48626917b0508d2dfa4953ac84c3e",
+    "scripts/beam_pool/worker.py": "ab329c7747461dde0eebfac2656324e2044572907e84ee5ca7e9f54dfdce2c3d"
+  },
+  "projectCommit": "55270df807213fc3584523d09e0311d7dc073ff5",
+  "toolchain": "leanprover/lean4:v4.33.1",
+  "corpusSha256": "de639d6059e682c20f515120bb11179b5d43f824867fd39933153def70dd763c",
+  "sources": {
+    "PrimeNumberTheoremAnd/IEANTN/RosserSchoenfeld/RosserSchoenfeldPrime.lean": "d1f0ebb4c5b382440b88d2e8896bb6b94cc5bdb09f8b333e7f3d231c84682c4a"
+  },
+  "pluginSha256": "b08c975e35d5a2bbc60f38cfef99167541995580933170ce7dc984a1c4e6fb23",
+  "workers": 2,
+  "cpusPerWorker": 2,
+  "memoryGiBPerWorker": 8,
+  "images": [
+    "sha256:4ff7fe1eae5358174ad5ba49e4eafe5f30194f46aa14cc6d0a83ee0a12300032",
+    "sha256:877348184760225e75dc602d3d5e25eaee7e7e0a402bfa40f55f62b03b439b64"
+  ],
+  "selectedTasks": [
+    "meisselMertensConstant_identity"
+  ],
+  "phases": [
+    "scaling"
+  ],
+  "scalingWorkload": "Repeated original/simp/linarith candidates at each initial proof state; not a search trace",
+  "seed": 17,
+  "repeat": 6,
+  "batchJobs": [
+    24
+  ],
+  "transferPrior": {
+    "copySeconds": 1.0,
+    "exportSeconds": 0.25
+  },
+  "hostLoadAtStart": [
+    1.9541015625,
+    2.2509765625,
+    2.15185546875
+  ],
+  "migration": [],
+  "scheduled": [],
+  "scaling": [
+    {
+      "theorem": "meisselMertensConstant_identity",
+      "mode": "serial",
+      "jobs": 24,
+      "seconds": 2.728599850088358,
+      "calibratedSeconds": [
+        0.2644743170822039,
+        0.037626627017743886,
+        0.03904455795418471
+      ],
+      "candidateOutcomes": [
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                },
+                {
+                  "names": [
+                    "integral_eq_loglog"
+                  ],
+                  "type": "\u222b (y : \u211d) in 2..x, 1 / y / Real.log y = Real.log (Real.log x) - Real.log (Real.log 2)"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 x \u2264 \u230ax\u230b\u208a with Nat.Prime x, (\u2191x)\u207b\u00b9 =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 s\u207b\u00b9 / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": false,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        }
+      ],
+      "completionP50Seconds": 1.4791665540542454,
+      "completionP95Seconds": 2.692873412044719,
+      "metrics": {
+        "exports": 0,
+        "imports": 0,
+        "steals": 0,
+        "stolenJobs": 0,
+        "transferBytes": 0,
+        "transferSeconds": 0.0,
+        "copyFailures": 0,
+        "completedByWorker": [
+          24
+        ]
+      },
+      "trial": 0
+    },
+    {
+      "theorem": "meisselMertensConstant_identity",
+      "mode": "pinned",
+      "jobs": 24,
+      "seconds": 2.765527035924606,
+      "calibratedSeconds": [
+        0.28301799192558974,
+        0.03793123702052981,
+        0.01741969503927976
+      ],
+      "candidateOutcomes": [
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                },
+                {
+                  "names": [
+                    "integral_eq_loglog"
+                  ],
+                  "type": "\u222b (y : \u211d) in 2..x, 1 / y / Real.log y = Real.log (Real.log x) - Real.log (Real.log 2)"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 x \u2264 \u230ax\u230b\u208a with Nat.Prime x, (\u2191x)\u207b\u00b9 =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 s\u207b\u00b9 / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": false,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        }
+      ],
+      "completionP50Seconds": 1.4500116719282232,
+      "completionP95Seconds": 2.7253962620161474,
+      "metrics": {
+        "exports": 0,
+        "imports": 0,
+        "steals": 0,
+        "stolenJobs": 0,
+        "transferBytes": 0,
+        "transferSeconds": 0.0,
+        "copyFailures": 0,
+        "completedByWorker": [
+          24,
+          0
+        ]
+      },
+      "trial": 0
+    },
+    {
+      "theorem": "meisselMertensConstant_identity",
+      "mode": "stealing",
+      "jobs": 24,
+      "seconds": 9.333425805903971,
+      "calibratedSeconds": [
+        0.2628716080216691,
+        0.040834220009855926,
+        0.03649657196365297
+      ],
+      "candidateOutcomes": [
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                },
+                {
+                  "names": [
+                    "integral_eq_loglog"
+                  ],
+                  "type": "\u222b (y : \u211d) in 2..x, 1 / y / Real.log y = Real.log (Real.log x) - Real.log (Real.log 2)"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 x \u2264 \u230ax\u230b\u208a with Nat.Prime x, (\u2191x)\u207b\u00b9 =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 s\u207b\u00b9 / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": false,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        }
+      ],
+      "completionP50Seconds": 8.682168016443029,
+      "completionP95Seconds": 9.171810758998618,
+      "metrics": {
+        "exports": 1,
+        "imports": 1,
+        "steals": 2,
+        "stolenJobs": 11,
+        "transferBytes": 46549401,
+        "transferSeconds": 8.348734295926988,
+        "copyFailures": 0,
+        "completedByWorker": [
+          17,
+          7
+        ]
+      },
+      "trial": 0
+    },
+    {
+      "theorem": "meisselMertensConstant_identity",
+      "mode": "stealing",
+      "jobs": 24,
+      "seconds": 8.942446080036461,
+      "calibratedSeconds": [
+        0.2905347649939358,
+        0.03767858201172203,
+        0.03570330305956304
+      ],
+      "candidateOutcomes": [
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                },
+                {
+                  "names": [
+                    "integral_eq_loglog"
+                  ],
+                  "type": "\u222b (y : \u211d) in 2..x, 1 / y / Real.log y = Real.log (Real.log x) - Real.log (Real.log 2)"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 x \u2264 \u230ax\u230b\u208a with Nat.Prime x, (\u2191x)\u207b\u00b9 =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 s\u207b\u00b9 / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": false,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        }
+      ],
+      "completionP50Seconds": 8.353881077026017,
+      "completionP95Seconds": 8.922455532010645,
+      "metrics": {
+        "exports": 1,
+        "imports": 1,
+        "steals": 2,
+        "stolenJobs": 11,
+        "transferBytes": 46549401,
+        "transferSeconds": 7.956514080986381,
+        "copyFailures": 0,
+        "completedByWorker": [
+          17,
+          7
+        ]
+      },
+      "trial": 1
+    },
+    {
+      "theorem": "meisselMertensConstant_identity",
+      "mode": "pinned",
+      "jobs": 24,
+      "seconds": 2.894992712070234,
+      "calibratedSeconds": [
+        0.2902862289920449,
+        0.0636805669637397,
+        0.039088658057153225
+      ],
+      "candidateOutcomes": [
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                },
+                {
+                  "names": [
+                    "integral_eq_loglog"
+                  ],
+                  "type": "\u222b (y : \u211d) in 2..x, 1 / y / Real.log y = Real.log (Real.log x) - Real.log (Real.log 2)"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 x \u2264 \u230ax\u230b\u208a with Nat.Prime x, (\u2191x)\u207b\u00b9 =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 s\u207b\u00b9 / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": false,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        }
+      ],
+      "completionP50Seconds": 1.5916670130682178,
+      "completionP95Seconds": 2.8739205080782995,
+      "metrics": {
+        "exports": 0,
+        "imports": 0,
+        "steals": 0,
+        "stolenJobs": 0,
+        "transferBytes": 0,
+        "transferSeconds": 0.0,
+        "copyFailures": 0,
+        "completedByWorker": [
+          24,
+          0
+        ]
+      },
+      "trial": 1
+    },
+    {
+      "theorem": "meisselMertensConstant_identity",
+      "mode": "serial",
+      "jobs": 24,
+      "seconds": 3.0769024840556085,
+      "calibratedSeconds": [
+        0.27939523896202445,
+        0.060714017949067056,
+        0.021295629907399416
+      ],
+      "candidateOutcomes": [
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                },
+                {
+                  "names": [
+                    "integral_eq_loglog"
+                  ],
+                  "type": "\u222b (y : \u211d) in 2..x, 1 / y / Real.log y = Real.log (Real.log x) - Real.log (Real.log 2)"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 x \u2264 \u230ax\u230b\u208a with Nat.Prime x, (\u2191x)\u207b\u00b9 =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 s\u207b\u00b9 / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": false,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        }
+      ],
+      "completionP50Seconds": 1.625430091517046,
+      "completionP95Seconds": 3.0398082410683855,
+      "metrics": {
+        "exports": 0,
+        "imports": 0,
+        "steals": 0,
+        "stolenJobs": 0,
+        "transferBytes": 0,
+        "transferSeconds": 0.0,
+        "copyFailures": 0,
+        "completedByWorker": [
+          24
+        ]
+      },
+      "trial": 1
+    },
+    {
+      "theorem": "meisselMertensConstant_identity",
+      "mode": "serial",
+      "jobs": 24,
+      "seconds": 2.9601017360109836,
+      "calibratedSeconds": [
+        0.28303363802842796,
+        0.040860704029910266,
+        0.042494203080423176
+      ],
+      "candidateOutcomes": [
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                },
+                {
+                  "names": [
+                    "integral_eq_loglog"
+                  ],
+                  "type": "\u222b (y : \u211d) in 2..x, 1 / y / Real.log y = Real.log (Real.log x) - Real.log (Real.log 2)"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 x \u2264 \u230ax\u230b\u208a with Nat.Prime x, (\u2191x)\u207b\u00b9 =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 s\u207b\u00b9 / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": false,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        }
+      ],
+      "completionP50Seconds": 1.624720211548265,
+      "completionP95Seconds": 2.9384018620476127,
+      "metrics": {
+        "exports": 0,
+        "imports": 0,
+        "steals": 0,
+        "stolenJobs": 0,
+        "transferBytes": 0,
+        "transferSeconds": 0.0,
+        "copyFailures": 0,
+        "completedByWorker": [
+          24
+        ]
+      },
+      "trial": 2
+    },
+    {
+      "theorem": "meisselMertensConstant_identity",
+      "mode": "stealing",
+      "jobs": 24,
+      "seconds": 8.974940655985847,
+      "calibratedSeconds": [
+        0.28925828100182116,
+        0.06475950591266155,
+        0.041738437954336405
+      ],
+      "candidateOutcomes": [
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                },
+                {
+                  "names": [
+                    "integral_eq_loglog"
+                  ],
+                  "type": "\u222b (y : \u211d) in 2..x, 1 / y / Real.log y = Real.log (Real.log x) - Real.log (Real.log 2)"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 x \u2264 \u230ax\u230b\u208a with Nat.Prime x, (\u2191x)\u207b\u00b9 =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 s\u207b\u00b9 / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": false,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        }
+      ],
+      "completionP50Seconds": 8.344829204957932,
+      "completionP95Seconds": 8.896938073914498,
+      "metrics": {
+        "exports": 1,
+        "imports": 1,
+        "steals": 2,
+        "stolenJobs": 11,
+        "transferBytes": 46549401,
+        "transferSeconds": 7.973406711011194,
+        "copyFailures": 0,
+        "completedByWorker": [
+          17,
+          7
+        ]
+      },
+      "trial": 2
+    },
+    {
+      "theorem": "meisselMertensConstant_identity",
+      "mode": "pinned",
+      "jobs": 24,
+      "seconds": 2.775299475993961,
+      "calibratedSeconds": [
+        0.26245767204090953,
+        0.0644324499880895,
+        0.03553284099325538
+      ],
+      "candidateOutcomes": [
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                },
+                {
+                  "names": [
+                    "integral_eq_loglog"
+                  ],
+                  "type": "\u222b (y : \u211d) in 2..x, 1 / y / Real.log y = Real.log (Real.log x) - Real.log (Real.log 2)"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 x \u2264 \u230ax\u230b\u208a with Nat.Prime x, (\u2191x)\u207b\u00b9 =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 s\u207b\u00b9 / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": false,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        }
+      ],
+      "completionP50Seconds": 1.4983200104907155,
+      "completionP95Seconds": 2.736667571007274,
+      "metrics": {
+        "exports": 0,
+        "imports": 0,
+        "steals": 0,
+        "stolenJobs": 0,
+        "transferBytes": 0,
+        "transferSeconds": 0.0,
+        "copyFailures": 0,
+        "completedByWorker": [
+          24,
+          0
+        ]
+      },
+      "trial": 2
+    },
+    {
+      "theorem": "meisselMertensConstant_identity",
+      "mode": "pinned",
+      "jobs": 24,
+      "seconds": 2.765971629996784,
+      "calibratedSeconds": [
+        0.26469127705786377,
+        0.03872022591531277,
+        0.01883833308238536
+      ],
+      "candidateOutcomes": [
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                },
+                {
+                  "names": [
+                    "integral_eq_loglog"
+                  ],
+                  "type": "\u222b (y : \u211d) in 2..x, 1 / y / Real.log y = Real.log (Real.log x) - Real.log (Real.log 2)"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 x \u2264 \u230ax\u230b\u208a with Nat.Prime x, (\u2191x)\u207b\u00b9 =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 s\u207b\u00b9 / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": false,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        }
+      ],
+      "completionP50Seconds": 1.44946615799563,
+      "completionP95Seconds": 2.7459850969025865,
+      "metrics": {
+        "exports": 0,
+        "imports": 0,
+        "steals": 0,
+        "stolenJobs": 0,
+        "transferBytes": 0,
+        "transferSeconds": 0.0,
+        "copyFailures": 0,
+        "completedByWorker": [
+          24,
+          0
+        ]
+      },
+      "trial": 3
+    },
+    {
+      "theorem": "meisselMertensConstant_identity",
+      "mode": "serial",
+      "jobs": 24,
+      "seconds": 2.832816115929745,
+      "calibratedSeconds": [
+        0.2785061670001596,
+        0.04121272498741746,
+        0.020416200975887477
+      ],
+      "candidateOutcomes": [
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                },
+                {
+                  "names": [
+                    "integral_eq_loglog"
+                  ],
+                  "type": "\u222b (y : \u211d) in 2..x, 1 / y / Real.log y = Real.log (Real.log x) - Real.log (Real.log 2)"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 x \u2264 \u230ax\u230b\u208a with Nat.Prime x, (\u2191x)\u207b\u00b9 =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 s\u207b\u00b9 / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": false,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        }
+      ],
+      "completionP50Seconds": 1.5623387494706549,
+      "completionP95Seconds": 2.7926228379365057,
+      "metrics": {
+        "exports": 0,
+        "imports": 0,
+        "steals": 0,
+        "stolenJobs": 0,
+        "transferBytes": 0,
+        "transferSeconds": 0.0,
+        "copyFailures": 0,
+        "completedByWorker": [
+          24
+        ]
+      },
+      "trial": 3
+    },
+    {
+      "theorem": "meisselMertensConstant_identity",
+      "mode": "stealing",
+      "jobs": 24,
+      "seconds": 8.73397266108077,
+      "calibratedSeconds": [
+        0.27672783692833036,
+        0.04081747401505709,
+        0.042470574961043894
+      ],
+      "candidateOutcomes": [
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                },
+                {
+                  "names": [
+                    "integral_eq_loglog"
+                  ],
+                  "type": "\u222b (y : \u211d) in 2..x, 1 / y / Real.log y = Real.log (Real.log x) - Real.log (Real.log 2)"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 x \u2264 \u230ax\u230b\u208a with Nat.Prime x, (\u2191x)\u207b\u00b9 =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 s\u207b\u00b9 / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": false,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        }
+      ],
+      "completionP50Seconds": 8.12134746951051,
+      "completionP95Seconds": 8.621984505094588,
+      "metrics": {
+        "exports": 1,
+        "imports": 1,
+        "steals": 2,
+        "stolenJobs": 11,
+        "transferBytes": 46549401,
+        "transferSeconds": 7.71989583701361,
+        "copyFailures": 0,
+        "completedByWorker": [
+          17,
+          7
+        ]
+      },
+      "trial": 3
+    },
+    {
+      "theorem": "meisselMertensConstant_identity",
+      "mode": "pinned",
+      "jobs": 24,
+      "seconds": 2.927612515981309,
+      "calibratedSeconds": [
+        0.29409634496551007,
+        0.06858254899270833,
+        0.022194006945937872
+      ],
+      "candidateOutcomes": [
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                },
+                {
+                  "names": [
+                    "integral_eq_loglog"
+                  ],
+                  "type": "\u222b (y : \u211d) in 2..x, 1 / y / Real.log y = Real.log (Real.log x) - Real.log (Real.log 2)"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 x \u2264 \u230ax\u230b\u208a with Nat.Prime x, (\u2191x)\u207b\u00b9 =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 s\u207b\u00b9 / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": false,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        }
+      ],
+      "completionP50Seconds": 1.6145631684339605,
+      "completionP95Seconds": 2.8890836489154026,
+      "metrics": {
+        "exports": 0,
+        "imports": 0,
+        "steals": 0,
+        "stolenJobs": 0,
+        "transferBytes": 0,
+        "transferSeconds": 0.0,
+        "copyFailures": 0,
+        "completedByWorker": [
+          24,
+          0
+        ]
+      },
+      "trial": 4
+    },
+    {
+      "theorem": "meisselMertensConstant_identity",
+      "mode": "stealing",
+      "jobs": 24,
+      "seconds": 8.743052560952492,
+      "calibratedSeconds": [
+        0.28452630806714296,
+        0.0418168279575184,
+        0.04229705489706248
+      ],
+      "candidateOutcomes": [
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                },
+                {
+                  "names": [
+                    "integral_eq_loglog"
+                  ],
+                  "type": "\u222b (y : \u211d) in 2..x, 1 / y / Real.log y = Real.log (Real.log x) - Real.log (Real.log 2)"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 x \u2264 \u230ax\u230b\u208a with Nat.Prime x, (\u2191x)\u207b\u00b9 =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 s\u207b\u00b9 / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": false,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        }
+      ],
+      "completionP50Seconds": 8.143024167511612,
+      "completionP95Seconds": 8.702256732038222,
+      "metrics": {
+        "exports": 1,
+        "imports": 1,
+        "steals": 2,
+        "stolenJobs": 11,
+        "transferBytes": 46549401,
+        "transferSeconds": 7.788429250009358,
+        "copyFailures": 0,
+        "completedByWorker": [
+          17,
+          7
+        ]
+      },
+      "trial": 4
+    },
+    {
+      "theorem": "meisselMertensConstant_identity",
+      "mode": "serial",
+      "jobs": 24,
+      "seconds": 2.850661041913554,
+      "calibratedSeconds": [
+        0.29253794497344643,
+        0.06483361101709306,
+        0.038816182990558445
+      ],
+      "candidateOutcomes": [
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                },
+                {
+                  "names": [
+                    "integral_eq_loglog"
+                  ],
+                  "type": "\u222b (y : \u211d) in 2..x, 1 / y / Real.log y = Real.log (Real.log x) - Real.log (Real.log 2)"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 x \u2264 \u230ax\u230b\u208a with Nat.Prime x, (\u2191x)\u207b\u00b9 =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 s\u207b\u00b9 / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": false,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        }
+      ],
+      "completionP50Seconds": 1.5343100884347223,
+      "completionP95Seconds": 2.832447543973103,
+      "metrics": {
+        "exports": 0,
+        "imports": 0,
+        "steals": 0,
+        "stolenJobs": 0,
+        "transferBytes": 0,
+        "transferSeconds": 0.0,
+        "copyFailures": 0,
+        "completedByWorker": [
+          24
+        ]
+      },
+      "trial": 4
+    },
+    {
+      "theorem": "meisselMertensConstant_identity",
+      "mode": "stealing",
+      "jobs": 24,
+      "seconds": 8.455863552051596,
+      "calibratedSeconds": [
+        0.2811143579892814,
+        0.06459132302552462,
+        0.018204683088697493
+      ],
+      "candidateOutcomes": [
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                },
+                {
+                  "names": [
+                    "integral_eq_loglog"
+                  ],
+                  "type": "\u222b (y : \u211d) in 2..x, 1 / y / Real.log y = Real.log (Real.log x) - Real.log (Real.log 2)"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 x \u2264 \u230ax\u230b\u208a with Nat.Prime x, (\u2191x)\u207b\u00b9 =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 s\u207b\u00b9 / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": false,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        }
+      ],
+      "completionP50Seconds": 7.8605441869585775,
+      "completionP95Seconds": 8.433192946948111,
+      "metrics": {
+        "exports": 1,
+        "imports": 1,
+        "steals": 2,
+        "stolenJobs": 11,
+        "transferBytes": 46549401,
+        "transferSeconds": 7.471973116975278,
+        "copyFailures": 0,
+        "completedByWorker": [
+          17,
+          7
+        ]
+      },
+      "trial": 5
+    },
+    {
+      "theorem": "meisselMertensConstant_identity",
+      "mode": "serial",
+      "jobs": 24,
+      "seconds": 2.8684235910186544,
+      "calibratedSeconds": [
+        0.2837469290243462,
+        0.04232092993333936,
+        0.03682544897310436
+      ],
+      "candidateOutcomes": [
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                },
+                {
+                  "names": [
+                    "integral_eq_loglog"
+                  ],
+                  "type": "\u222b (y : \u211d) in 2..x, 1 / y / Real.log y = Real.log (Real.log x) - Real.log (Real.log 2)"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 x \u2264 \u230ax\u230b\u208a with Nat.Prime x, (\u2191x)\u207b\u00b9 =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 s\u207b\u00b9 / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": false,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        }
+      ],
+      "completionP50Seconds": 1.5678587949369103,
+      "completionP95Seconds": 2.832300130976364,
+      "metrics": {
+        "exports": 0,
+        "imports": 0,
+        "steals": 0,
+        "stolenJobs": 0,
+        "transferBytes": 0,
+        "transferSeconds": 0.0,
+        "copyFailures": 0,
+        "completedByWorker": [
+          24
+        ]
+      },
+      "trial": 5
+    },
+    {
+      "theorem": "meisselMertensConstant_identity",
+      "mode": "pinned",
+      "jobs": 24,
+      "seconds": 2.9785550070228055,
+      "calibratedSeconds": [
+        0.28487210907042027,
+        0.042175985989160836,
+        0.021623797016218305
+      ],
+      "candidateOutcomes": [
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                },
+                {
+                  "names": [
+                    "integral_eq_loglog"
+                  ],
+                  "type": "\u222b (y : \u211d) in 2..x, 1 / y / Real.log y = Real.log (Real.log x) - Real.log (Real.log 2)"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": true,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 x \u2264 \u230ax\u230b\u208a with Nat.Prime x, (\u2191x)\u207b\u00b9 =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 s\u207b\u00b9 / Real.log s) y"
+            }
+          ]
+        },
+        {
+          "success": false,
+          "goals": [
+            {
+              "goalPrefix": "\u22a2 ",
+              "hyps": [
+                {
+                  "names": [
+                    "x"
+                  ],
+                  "type": "\u211d"
+                },
+                {
+                  "names": [
+                    "hx"
+                  ],
+                  "type": "2 \u2264 x"
+                }
+              ],
+              "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+            }
+          ]
+        }
+      ],
+      "completionP50Seconds": 1.6251257374533452,
+      "completionP95Seconds": 2.9567360730143264,
+      "metrics": {
+        "exports": 0,
+        "imports": 0,
+        "steals": 0,
+        "stolenJobs": 0,
+        "transferBytes": 0,
+        "transferSeconds": 0.0,
+        "copyFailures": 0,
+        "completedByWorker": [
+          24,
+          0
+        ]
+      },
+      "trial": 5
+    }
+  ],
+  "runtime": "a6d7bb65b640e09a649a37e45b65e955c7475d72de930f3a7064579a3b83e9d1",
+  "openSeconds": 26.083867100067437,
+  "scalingSummary": [
+    {
+      "theorem": "meisselMertensConstant_identity",
+      "jobs": 24,
+      "pairedSpeedups": [
+        0.29630353242592217,
+        0.3237361104735261,
+        0.3092276130141286,
+        0.31669112525645504,
+        0.33485015623220354,
+        0.3522472883683342
+      ],
+      "geometricMeanSpeedup": 0.32167949863613804,
+      "pairedBootstrap95Percent": [
+        0.30796109774517827,
+        0.33645490161338926
+      ],
+      "medianSeconds": {
+        "serial": 2.8595423164661042,
+        "pinned": 2.8351460940320976,
+        "stealing": 8.842749320494477
+      },
+      "everyStealingTrialMigrated": true
+    }
+  ],
+  "passed": true
+}

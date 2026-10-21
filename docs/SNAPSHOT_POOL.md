@@ -128,8 +128,9 @@ require a new worker generation; the normal local Beam edit/sync APIs remain ava
 
 Snapshots use standard zlib compression at level 1 for transport. The checksum covers the encoded
 bytes; import verifies it, admits the declared uncompressed size against the mapping budget, and
-requires one complete stream of exactly that size. Decompression output is bounded before allocation
-can exceed the admitted size. Compression changes neither Lean's native format nor the proof state.
+requires one complete stream of exactly that size. Decompression output is limited to the admitted
+size plus one byte so oversized streams can be rejected. Compression changes neither Lean's native
+format nor the proof state.
 
 Defaults bound the queue to 4,096 jobs, the coordinator's compressed export cache to 256 MiB, each worker
 to 4,096 handles, 16 open documents and 256 MiB of uncompressed imported mappings, and a single
@@ -239,12 +240,59 @@ trace or an end-to-end theorem-proving result. It compares:
 
 Every run creates a fresh parent and coordinator, with empty export and replica caches. The same
 untimed calibration estimates candidate costs in every mode. Timed completion includes scheduling,
-export, compression, network transfer, import, and all candidate responses. File opening and handle
-setup are reported separately from the measured batch. Six trials balance all mode-order permutations;
+export, compression, network transfer, import, and all candidate responses. File opening is reported
+separately; handle setup and calibration are excluded from the measured batch. Six trials balance
+all mode-order permutations;
 the random seed, source/runtime fingerprints, per-trial timings, candidate agreement, and transfer
 counts are recorded. Reports include paired pinned/stealing ratios and a descriptive 95% bootstrap
 interval over trial pairs. A speedup attributed to migration requires actual imports in every
 stealing trial. Three cheap candidates provide the control where copies should be avoided.
+
+The [six-trial scaling run](benchmarks/snapshot-corpus-scaling-2026-10-21.json) used two workers with
+two CPUs each on the same host. For 384 evaluations, median batch times were 47.184 seconds with one
+worker, 47.086 seconds with pinned affinity, and 30.049 seconds with stealing. The geometric mean of
+paired pinned/stealing ratios was **1.554×**, with a descriptive paired-bootstrap interval of
+**1.536–1.577×**. Every stealing trial exported and imported exactly once and split the completed
+work approximately evenly. For three evaluations, pinned and stealing medians were 0.349 and
+0.353 seconds, with zero transfers in all trials. That small difference does not establish a
+performance benefit.
+
+Initial transfer estimates also need evaluation. The default pool starts with a one-second copy
+estimate and a 0.25-second source stall estimate, which are optimistic for this project. In the
+divisible-work model, a beneficial split requires `W > C + S`; these corpus measurements put that
+threshold near 15 seconds of queued work, before whole-job boundaries and the safety margin.
+The existing `Pool` parameters `cold_transfer_seconds` and `source_stall_seconds` accept measured
+priors. For a separate benchmark with a measured prior, pass
+`--transfer-profile /path/to/passing-migration-report.json`. The harness checks the worker/runtime
+identity and uses the median copy/export times from that report. It records the profile hash and
+the time spent on those earlier copies. Profiling is outside the timed batch and must be charged
+when reporting cold, end-to-end performance; it is not free startup work.
+
+An intermediate queue makes that distinction concrete. With 24 evaluations and the
+[default prior](benchmarks/snapshot-corpus-medium-default-2026-10-21.json), pinned batches took a
+median 2.835 seconds, while stealing took 8.843 seconds. All six stealing trials copied a snapshot:
+the optimistic estimate admitted a transfer whose actual cost exceeded the queued work. This is a
+performance regression, even though every candidate result remained correct.
+
+Using a [measured prior](benchmarks/snapshot-corpus-medium-profiled-2026-10-21.json) of 7.964 seconds
+for copy and 7.008 seconds for source export, all six intermediate-queue trials avoided transfer.
+Pinned and stealing medians were 3.014 and 2.890 seconds. The paired ratio interval includes 1, so
+this establishes avoidance of the costly copy, not a speedup. The prior came from three earlier
+copies totaling 24.558 seconds, excluding their document setup and verification work. Those costs
+must be accounted for when deciding whether profiling is worthwhile for a short-lived deployment.
+The pool already accepts these measured costs; the harness uses that existing interface without
+changing the scheduling rule or inflating candidate estimates.
+
+| Queued evaluations | Transfer prior | Pinned median | Stealing median | Copies per stealing trial |
+| ---: | --- | ---: | ---: | ---: |
+| 3 | Default | 0.349 s | 0.353 s | 0 |
+| 24 | Default | 2.835 s | 8.843 s | 1 |
+| 24 | Measured separately | 3.014 s | 2.890 s | 0 |
+| 384 | Default | 47.086 s | 30.049 s | 1 |
+
+Use the same `scaling` command with `--batch-jobs 24` to reproduce the intermediate queue.
+For its measured-prior variant, add `--transfer-profile` pointing to the preceding scaling report
+that includes the migration phase. Keep each output directory distinct.
 
 For a broader evaluation, replay a fixed real search trace with unique candidates and dependencies,
 then run live search at identical model and tactic budgets. Report time to proof and solved count as
