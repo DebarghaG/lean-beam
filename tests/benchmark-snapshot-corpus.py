@@ -180,14 +180,16 @@ async def scheduled_replay(peers, tasks, stealing):
         await pool.close()
 
 
-async def branch_batch(peers, task, mode, jobs, seed):
+async def branch_batch(peers, task, mode, jobs, seed, transfer_prior):
     """Repeat frozen, real candidates to isolate scheduling throughput on one proof state.
 
     This deliberate fan-out is a scaling microbenchmark, not a recorded search trace.
     Each trial starts with a new parent, coordinator, and empty export/replica cache.
     """
     pool = await Pool(peers[:1] if mode == "serial" else peers,
-                      stealing=mode == "stealing", seed=seed).start()
+                      stealing=mode == "stealing", seed=seed,
+                      cold_transfer_seconds=transfer_prior["copySeconds"],
+                      source_stall_seconds=transfer_prior["exportSeconds"]).start()
     try:
         parent = (await pool.run_at(task["file"], task["proof_start"], task["indent"], "skip"))["handle"]
         candidates = [task["steps"][0]["text"], "simp", "linarith"]
@@ -278,11 +280,24 @@ async def main(args):
               "phases": args.phases,
               "scalingWorkload": "Repeated original/simp/linarith candidates at each initial proof state; not a search trace",
               "seed": args.seed, "repeat": args.repeat, "batchJobs": args.batch_jobs,
+              "transferPrior": {"copySeconds": 1.0, "exportSeconds": 0.25},
               "hostLoadAtStart": os.getloadavg(),
               "migration": [], "scheduled": [], "scaling": []}
     try:
         await cluster.start()
         report["runtime"] = (await cluster.peers[0].call("status"))[0]["runtime"]
+        if args.transfer_profile:
+            profile = json.loads(args.transfer_profile.read_text())
+            if not profile.get("passed") or profile["runtime"] != report["runtime"] or \
+                    profile["workerSourcesSha256"] != report["workerSourcesSha256"]:
+                raise ValueError("transfer profile must be a passing run of this worker/runtime")
+            samples = [step for task in profile["migration"] for step in task["steps"]]
+            if not samples:
+                raise ValueError("transfer profile contains no migration measurements")
+            report["transferPrior"] = {key: statistics.median(step[key] for step in samples)
+                                       for key in ("copySeconds", "exportSeconds")}
+            report["transferProfileSha256"] = digest(args.transfer_profile)
+            report["profileCopySeconds"] = sum(step["copySeconds"] for step in samples)
         opened = time.monotonic()
         for name in sources:
             print(f"open: {name}", flush=True)
@@ -304,7 +319,8 @@ async def main(args):
                 for jobs in args.batch_jobs:
                     for trial, order in enumerate(orders[:args.repeat]):
                         for mode in order:
-                            run = await branch_batch(cluster.peers, task, mode, jobs, args.seed + trial)
+                            run = await branch_batch(cluster.peers, task, mode, jobs, args.seed + trial,
+                                                     report["transferPrior"])
                             run["trial"] = trial
                             report["scaling"].append(run)
                             print(json.dumps(run), flush=True)
@@ -345,6 +361,8 @@ if __name__ == "__main__":
     parser.add_argument("--repeat", type=int, default=6)
     parser.add_argument("--seed", type=int, default=17)
     parser.add_argument("--batch-jobs", type=int, nargs="+", default=[3, 192])
+    parser.add_argument("--transfer-profile", type=Path,
+                        help="Seed copy/export estimates from a separate passing migration report")
     parser.add_argument("--phases", nargs="+", choices=["pinned", "migration", "stealing", "scaling"],
                         default=["pinned", "migration", "stealing"])
     args = parser.parse_args()
