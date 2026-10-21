@@ -84,6 +84,11 @@ Pre-stable compatibility policy lives in [Compatibility Policy](COMPATIBILITY.md
 - bundled Lean skills for supported agent clients
 
 ### Coverage
+
+An opt-in [distributed snapshot pool](SNAPSHOT_POOL.md) is available as a Python coordinator and
+Linux network worker. It reuses the upstream LSP proof engine and does not change the installed
+local CLI/MCP routing.
+
 - repo-local regression coverage around isolation, stale state, cancellation, and handle invalidation
 - broker, wrapper, install, MCP, and CI coverage described in [docs/TESTING.md](TESTING.md)
 

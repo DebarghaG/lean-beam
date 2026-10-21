@@ -449,6 +449,30 @@
       "method": "$/beam/waitForDiagnostics",
       "coverage": ["standard-lsp-interference"],
       "pointer": "tests/lean/BeamTest/LSP/Requests/DiagnosticsBarrier/BasicTest.lean#checkDiagnosticsBarrierWithStandardLspInterference"
+    },
+    {
+      "id": "transfer.exportSnapshot",
+      "method": "$/lean/beam/exportSnapshot",
+      "coverage": [
+        "snapshot-transfer"
+      ],
+      "pointer": "tests/test-beam-snapshot-transfer.py"
+    },
+    {
+      "id": "transfer.importSnapshot",
+      "method": "$/lean/beam/importSnapshot",
+      "coverage": [
+        "snapshot-transfer"
+      ],
+      "pointer": "tests/test-beam-snapshot-transfer.py"
+    },
+    {
+      "id": "transfer.snapshotContext",
+      "method": "$/lean/beam/snapshotContext",
+      "coverage": [
+        "snapshot-transfer"
+      ],
+      "pointer": "tests/test-beam-snapshot-transfer.py"
     }
   ]
 }

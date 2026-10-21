@@ -131,10 +131,15 @@ private def buildNativeObject (pkg : Package) (name : String) : FetchM (Job File
 
 target beamControlDirObj (pkg) : FilePath := buildNativeObject pkg "control_dir"
 target beamProcessJobObj (pkg) : FilePath := buildNativeObject pkg "process_job"
+target beamRegionOwnerObj (pkg) : FilePath := buildNativeObject pkg "region_owner"
+target beamRegionOwnerLib (pkg) : FilePath := do
+  let object ← fetch <| pkg.target `beamRegionOwnerObj
+  buildStaticLib (pkg.buildDir / "native" / "libbeam_region_owner.a") #[object]
 
 lean_lib Beam.LSP where
   globs := #[.andSubmodules `Beam.LSP]
   defaultFacets := #[`shared]
+  moreLinkObjs := #[beamRegionOwnerLib]
   -- Darwin otherwise records the absolute build path as the dylib install name, so identical
   -- sources built in different directories would differ. The plugin is only loaded by path.
   moreLinkArgs := if System.Platform.isOSX then
@@ -142,7 +147,7 @@ lean_lib Beam.LSP where
 
 lean_lib Beam where
   defaultFacets := #[`shared]
-  moreLinkObjs := #[beamControlDirObj, beamProcessJobObj]
+  moreLinkObjs := #[beamControlDirObj, beamProcessJobObj, beamRegionOwnerLib]
 
 lean_lib BeamTest where
   srcDir := "tests/lean"

@@ -16,6 +16,9 @@ not retain executable proof states for continuation.
 -/
 namespace Beam.LSP.RunAt
 
+private instance : Nonempty Elab.Term.Context := ⟨{}⟩
+private instance : Nonempty Elab.Tactic.Context := ⟨{ elaborator := .anonymous }⟩
+
 structure ProofSnapshot where
   coreState : Core.State
   coreContext : Core.Context
@@ -25,6 +28,7 @@ structure ProofSnapshot where
   termContext : Elab.Term.Context
   tacticState : Elab.Tactic.State
   tacticContext : Elab.Tactic.Context
+  deriving Nonempty
 
 namespace ProofSnapshot
 

@@ -1,0 +1,280 @@
+{
+  "date": "2026-10-21",
+  "upstreamBase": "11b57847b2d2e99a3ef504eeaa9b4cf2600f16fd",
+  "implementationSha256": "3e87ab142d4819196cb638eff6a6eb484fc6fc536c49faac16a8ca7c61efc80b",
+  "scope": "Synthetic Lean tactic elaboration on one aarch64 host; different worker images and source mount paths; identical native runtime paths.",
+  "limitsPerContainer": {
+    "cpus": 2,
+    "memory": "3g",
+    "pids": 256
+  },
+  "schedulerSeed": 17,
+  "heavy": {
+    "docker": true,
+    "workers": 4,
+    "snapshotBytes": 23972324,
+    "leanVersion": "Lean (version 4.36.0-rc1, aarch64-unknown-linux-gnu, commit c9afcddf514a6772bd4d649f7cfc04eff0b9f15e, Release)",
+    "runtime": "f09df97ad79166eaf1a1be7010e7930fce33d3d756c3dc928d71a55f0c61d32c",
+    "runs": [
+      {
+        "stealing": false,
+        "jobs": 48,
+        "steps": 500,
+        "seconds": 5.854107589926571,
+        "calibratedServiceSeconds": 0.13805564295034856,
+        "exports": 0,
+        "imports": 0,
+        "steals": 0,
+        "stolenJobs": 0,
+        "transferBytes": 0,
+        "transferSeconds": 0.0,
+        "copyFailures": 0,
+        "completedByWorker": [
+          50,
+          0,
+          0,
+          0
+        ],
+        "trial": 0
+      },
+      {
+        "stealing": true,
+        "jobs": 48,
+        "steps": 500,
+        "seconds": 2.4929337449138984,
+        "calibratedServiceSeconds": 0.14055922895204276,
+        "exports": 1,
+        "imports": 3,
+        "steals": 8,
+        "stolenJobs": 49,
+        "transferBytes": 71921388,
+        "transferSeconds": 2.9373793319100514,
+        "copyFailures": 0,
+        "completedByWorker": [
+          17,
+          15,
+          9,
+          9
+        ],
+        "trial": 0
+      },
+      {
+        "stealing": true,
+        "jobs": 48,
+        "steps": 500,
+        "seconds": 2.1219948179787025,
+        "calibratedServiceSeconds": 0.12602289102505893,
+        "exports": 1,
+        "imports": 3,
+        "steals": 8,
+        "stolenJobs": 52,
+        "transferBytes": 71921388,
+        "transferSeconds": 1.429800878977403,
+        "copyFailures": 0,
+        "completedByWorker": [
+          14,
+          12,
+          12,
+          12
+        ],
+        "trial": 1
+      },
+      {
+        "stealing": false,
+        "jobs": 48,
+        "steps": 500,
+        "seconds": 6.208421066985466,
+        "calibratedServiceSeconds": 0.11641704000066966,
+        "exports": 0,
+        "imports": 0,
+        "steals": 0,
+        "stolenJobs": 0,
+        "transferBytes": 0,
+        "transferSeconds": 0.0,
+        "copyFailures": 0,
+        "completedByWorker": [
+          50,
+          0,
+          0,
+          0
+        ],
+        "trial": 1
+      },
+      {
+        "stealing": false,
+        "jobs": 48,
+        "steps": 500,
+        "seconds": 6.2809368160087615,
+        "calibratedServiceSeconds": 0.142681043012999,
+        "exports": 0,
+        "imports": 0,
+        "steals": 0,
+        "stolenJobs": 0,
+        "transferBytes": 0,
+        "transferSeconds": 0.0,
+        "copyFailures": 0,
+        "completedByWorker": [
+          50,
+          0,
+          0,
+          0
+        ],
+        "trial": 2
+      },
+      {
+        "stealing": true,
+        "jobs": 48,
+        "steps": 500,
+        "seconds": 2.0416034939698875,
+        "calibratedServiceSeconds": 0.11661804397590458,
+        "exports": 1,
+        "imports": 3,
+        "steals": 9,
+        "stolenJobs": 51,
+        "transferBytes": 71921388,
+        "transferSeconds": 1.276201545028016,
+        "copyFailures": 0,
+        "completedByWorker": [
+          15,
+          12,
+          12,
+          11
+        ],
+        "trial": 2
+      }
+    ],
+    "speedup": 2.9257475156792663,
+    "pinnedMedianSeconds": 6.208421066985466,
+    "stealingMedianSeconds": 2.1219948179787025
+  },
+  "cheap": {
+    "docker": true,
+    "workers": 2,
+    "snapshotBytes": 23972324,
+    "leanVersion": "Lean (version 4.36.0-rc1, aarch64-unknown-linux-gnu, commit c9afcddf514a6772bd4d649f7cfc04eff0b9f15e, Release)",
+    "runtime": "f09df97ad79166eaf1a1be7010e7930fce33d3d756c3dc928d71a55f0c61d32c",
+    "runs": [
+      {
+        "stealing": false,
+        "jobs": 24,
+        "steps": 1,
+        "seconds": 0.05072184989694506,
+        "calibratedServiceSeconds": 0.0029293630504980683,
+        "exports": 0,
+        "imports": 0,
+        "steals": 0,
+        "stolenJobs": 0,
+        "transferBytes": 0,
+        "transferSeconds": 0.0,
+        "copyFailures": 0,
+        "completedByWorker": [
+          26,
+          0
+        ],
+        "trial": 0
+      },
+      {
+        "stealing": true,
+        "jobs": 24,
+        "steps": 1,
+        "seconds": 0.04716642701532692,
+        "calibratedServiceSeconds": 0.0018547569634392858,
+        "exports": 0,
+        "imports": 0,
+        "steals": 0,
+        "stolenJobs": 0,
+        "transferBytes": 0,
+        "transferSeconds": 0.0,
+        "copyFailures": 0,
+        "completedByWorker": [
+          26,
+          0
+        ],
+        "trial": 0
+      },
+      {
+        "stealing": true,
+        "jobs": 24,
+        "steps": 1,
+        "seconds": 0.054588639992289245,
+        "calibratedServiceSeconds": 0.0026872269809246063,
+        "exports": 0,
+        "imports": 0,
+        "steals": 0,
+        "stolenJobs": 0,
+        "transferBytes": 0,
+        "transferSeconds": 0.0,
+        "copyFailures": 0,
+        "completedByWorker": [
+          26,
+          0
+        ],
+        "trial": 1
+      },
+      {
+        "stealing": false,
+        "jobs": 24,
+        "steps": 1,
+        "seconds": 0.05637031199876219,
+        "calibratedServiceSeconds": 0.0027603760827332735,
+        "exports": 0,
+        "imports": 0,
+        "steals": 0,
+        "stolenJobs": 0,
+        "transferBytes": 0,
+        "transferSeconds": 0.0,
+        "copyFailures": 0,
+        "completedByWorker": [
+          26,
+          0
+        ],
+        "trial": 1
+      },
+      {
+        "stealing": false,
+        "jobs": 24,
+        "steps": 1,
+        "seconds": 0.06220815796405077,
+        "calibratedServiceSeconds": 0.002125212922692299,
+        "exports": 0,
+        "imports": 0,
+        "steals": 0,
+        "stolenJobs": 0,
+        "transferBytes": 0,
+        "transferSeconds": 0.0,
+        "copyFailures": 0,
+        "completedByWorker": [
+          26,
+          0
+        ],
+        "trial": 2
+      },
+      {
+        "stealing": true,
+        "jobs": 24,
+        "steps": 1,
+        "seconds": 0.05895450199022889,
+        "calibratedServiceSeconds": 0.0021589399548247457,
+        "exports": 0,
+        "imports": 0,
+        "steals": 0,
+        "stolenJobs": 0,
+        "transferBytes": 0,
+        "transferSeconds": 0.0,
+        "copyFailures": 0,
+        "completedByWorker": [
+          26,
+          0
+        ],
+        "trial": 2
+      }
+    ],
+    "speedup": 1.03263814608176,
+    "pinnedMedianSeconds": 0.05637031199876219,
+    "stealingMedianSeconds": 0.054588639992289245
+  },
+  "images": {
+    "a": "sha256:fc8ce63f08c3504b8678cd7ace50159c03cd6ceb9ed792c60481e8e009fd7df9",
+    "b": "sha256:7ced59a4264c4f3f8475eff6aefc47b57bc03694bf5cf0e36eabf33e8e9d23a3"
+  }
+}

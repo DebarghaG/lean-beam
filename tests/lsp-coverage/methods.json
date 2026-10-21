@@ -141,6 +141,33 @@
         "satisfied-version",
         "standard-lsp-interference"
       ]
+    },
+    {
+      "method": "$/lean/beam/exportSnapshot",
+      "family": "RunAt.Transfer",
+      "registrySymbol": "RunAt.Transfer.exportMethod",
+      "definition": "Beam/LSP/RunAt/Transfer.lean#exportMethod",
+      "requiredCoverage": [
+        "snapshot-transfer"
+      ]
+    },
+    {
+      "method": "$/lean/beam/importSnapshot",
+      "family": "RunAt.Transfer",
+      "registrySymbol": "RunAt.Transfer.importMethod",
+      "definition": "Beam/LSP/RunAt/Transfer.lean#importMethod",
+      "requiredCoverage": [
+        "snapshot-transfer"
+      ]
+    },
+    {
+      "method": "$/lean/beam/snapshotContext",
+      "family": "RunAt.Transfer",
+      "registrySymbol": "RunAt.Transfer.contextMethod",
+      "definition": "Beam/LSP/RunAt/Transfer.lean#contextMethod",
+      "requiredCoverage": [
+        "snapshot-transfer"
+      ]
     }
   ]
 }

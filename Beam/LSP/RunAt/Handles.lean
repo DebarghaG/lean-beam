@@ -6,6 +6,7 @@ Author: Emilio J. Gallego Arias
 
 import Lean.Server.Requests
 import Beam.LSP.RunAt.ProofSnapshot
+import Beam.LSP.RunAt.RegionOwner
 
 open Lean
 open Lean.Server
@@ -27,6 +28,17 @@ structure Handle where
 inductive StoredHandleState where
   | command (snapshot : Snapshots.Snapshot)
   | proof (snapshot : ProofSnapshot)
+  | importedProof (snapshot : (ImportedSnapshot ProofSnapshot).type)
+
+def StoredHandleState.keepAlive (state : StoredHandleState) : IO Unit := do
+  if let .importedProof snapshot := state then
+    ImportedSnapshot.keepAlive snapshot
+
+def StoredHandleState.inheritRegion (parent next : StoredHandleState) : IO StoredHandleState := do
+  match parent, next with
+  | .importedProof owner, .proof data =>
+      return .importedProof (← ImportedSnapshot.derive owner data)
+  | _, _ => return next
 
 structure StoredHandle where
   uri : Lean.Lsp.DocumentUri

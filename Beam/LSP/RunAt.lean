@@ -547,15 +547,25 @@ def handleRunWith (p : RunWithParams) : RequestM (RequestTask Result) := do
   checkRequestCancelled
   withStoredHandle p.handle (p.linear?.getD false) fun stored => do
     RequestM.asTask do
-      checkRequestCancelled
-      let (result, state?) ←
-        match stored.state with
-        | .command snapshot =>
-            runCommandText snapshot p.text
-        | .proof snapshot =>
-            let initialProofState ← proofStateOfSnapshot snapshot
-            runTacticText snapshot initialProofState p.text
-      maybeAttachHandle result (p.storeHandle?.getD false) state?
+      try
+        checkRequestCancelled
+        let (result, state?) ←
+          match stored.state with
+          | .command snapshot =>
+              runCommandText snapshot p.text
+          | .proof snapshot =>
+              let initialProofState ← proofStateOfSnapshot snapshot
+              runTacticText snapshot initialProofState p.text
+          | .importedProof owner =>
+              let snapshot := ImportedSnapshot.data owner
+              let initialProofState ← proofStateOfSnapshot snapshot
+              runTacticText snapshot initialProofState p.text
+        let state? ← if p.storeHandle?.getD false then
+          state?.mapM (stored.state.inheritRegion ·)
+        else pure none
+        maybeAttachHandle result (p.storeHandle?.getD false) state?
+      finally
+        stored.state.keepAlive
 
 def handleReleaseHandle (p : ReleaseHandleParams) : RequestM (RequestTask Json) := do
   syncHandleStoreForCurrentDoc
