@@ -1,0 +1,10 @@
+[
+  "simp",
+  "simp_all",
+  "ring_nf",
+  "linarith",
+  "nlinarith",
+  "omega",
+  "set_option maxHeartbeats 200000 in aesop",
+  "set_option maxHeartbeats 200000 in grind"
+]

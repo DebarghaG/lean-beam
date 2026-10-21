@@ -104,7 +104,7 @@ async def call(peer, operation, task, **params):
     return result
 
 
-async def migration_check(peers, task):
+async def migration_check(peers, task, tactics):
     print(f"migration: {task['theorem']}", flush=True)
     owner = 0
     initial = await call(peers[owner], "runAt", task, text="skip", store=True,
@@ -117,15 +117,15 @@ async def migration_check(peers, task):
         destination = 1 - owner
         started = time.monotonic()
         print(f"  step {index + 1}: exporting", flush=True)
-        async with asyncio.timeout(30):
-            manifest, data = await peers[owner].call("export", {"path": task["file"], "handle": parent})
+        manifest, data = await peers[owner].call("export", {"path": task["file"], "handle": parent})
+        export_rpc_seconds = time.monotonic() - started
         print(f"  step {index + 1}: importing {len(data)} bytes", flush=True)
         imported, _ = await peers[destination].call("import", {
             "path": task["file"], "manifest": manifest,
         }, data)
         copy_seconds = time.monotonic() - started
         comparisons = []
-        for label, text in (("original", step["text"]), ("simp", "simp"), ("linarith", "linarith")):
+        for label, text in [("original", step["text"]), *((text, text) for text in tactics)]:
             local, remote = await asyncio.gather(
                 call(peers[owner], "runWith", task, handle=parent, text=text),
                 call(peers[destination], "runWith", task, handle=imported["handle"], text=text))
@@ -141,6 +141,11 @@ async def migration_check(peers, task):
         parent, owner = advanced["handle"], destination
         records.append({"step": index, "snapshotBytes": manifest["uncompressedBytes"],
                         "wireBytes": len(data), "exportSeconds": manifest["exportSeconds"],
+                        "exportStagesSeconds": manifest["exportStagesSeconds"],
+                        "nativeExportStagesSeconds": manifest["nativeExportStagesSeconds"],
+                        "exportRpcSeconds": export_rpc_seconds,
+                        "importSeconds": imported["importSeconds"],
+                        "importStagesSeconds": imported["importStagesSeconds"],
                         "copySeconds": copy_seconds,
                         "comparisons": comparisons})
         print(f"  step {index + 1}: candidate agreement, {len(data)} bytes transferred", flush=True)
@@ -152,8 +157,10 @@ async def migration_check(peers, task):
     return {"theorem": task["theorem"], "solved": True, "steps": records}
 
 
-async def scheduled_replay(peers, tasks, stealing):
-    pool = await Pool(peers, stealing=stealing, seed=17).start()
+async def scheduled_replay(peers, tasks, stealing, tactics, transfer_prior):
+    pool = await Pool(peers, stealing=stealing, seed=17,
+                      cold_transfer_seconds=transfer_prior["copySeconds"],
+                      source_stall_seconds=transfer_prior["exportSeconds"]).start()
     records = []
     started = time.monotonic()
     try:
@@ -166,7 +173,7 @@ async def scheduled_replay(peers, tasks, stealing):
             for step in task["steps"]:
                 results = await asyncio.gather(
                     pool.submit(parent, step["text"], store=True),
-                    pool.submit(parent, "simp"), pool.submit(parent, "linarith"))
+                    *(pool.submit(parent, text) for text in tactics))
                 assert results[0]["success"], results[0]
                 steps.append([outcome(result) for result in results])
                 await pool.release(parent)
@@ -180,7 +187,7 @@ async def scheduled_replay(peers, tasks, stealing):
         await pool.close()
 
 
-async def branch_batch(peers, task, mode, jobs, seed, transfer_prior):
+async def branch_batch(peers, task, mode, jobs, seed, transfer_prior, tactics):
     """Repeat frozen, real candidates to isolate scheduling throughput on one proof state.
 
     This deliberate fan-out is a scaling microbenchmark, not a recorded search trace.
@@ -191,9 +198,12 @@ async def branch_batch(peers, task, mode, jobs, seed, transfer_prior):
                       cold_transfer_seconds=transfer_prior["copySeconds"],
                       source_stall_seconds=transfer_prior["exportSeconds"]).start()
     try:
+        setup_started = time.monotonic()
         parent = (await pool.run_at(task["file"], task["proof_start"], task["indent"], "skip"))["handle"]
-        candidates = [task["steps"][0]["text"], "simp", "linarith"]
+        setup_seconds = time.monotonic() - setup_started
+        candidates = [task["steps"][0]["text"], *tactics]
         expected, estimates = [], []
+        calibration_started = time.monotonic()
         # Identical untimed calibration in all modes; never inflate estimates to force a steal.
         for text in candidates:
             samples = []
@@ -206,21 +216,25 @@ async def branch_batch(peers, task, mode, jobs, seed, transfer_prior):
             assert all(value == outcomes[0] for value in outcomes)
             estimates.append(statistics.median(samples))
             expected.append(outcome(result))
+        calibration_seconds = time.monotonic() - calibration_started
         counts_before = list(pool.metrics["completedByWorker"])
         completed = []
         started = time.monotonic()
-        futures = [pool.submit(parent, candidates[i % 3], estimate=estimates[i % 3])
+        futures = [pool.submit(parent, candidates[i % len(candidates)],
+                               estimate=estimates[i % len(candidates)])
                    for i in range(jobs)]
         for future in futures:
             future.add_done_callback(lambda _: completed.append(time.monotonic() - started))
         results = await asyncio.gather(*futures)
         elapsed = time.monotonic() - started
-        assert all(outcome(result) == expected[i % 3] for i, result in enumerate(results))
+        assert all(outcome(result) == expected[i % len(candidates)] for i, result in enumerate(results))
         metrics = dict(pool.metrics)
         metrics["completedByWorker"] = [after - before for after, before in
                                          zip(metrics["completedByWorker"], counts_before)]
         await pool.release(parent)
         return {"theorem": task["theorem"], "mode": mode, "jobs": jobs, "seconds": elapsed,
+                "setupSeconds": setup_seconds, "calibrationSeconds": calibration_seconds,
+                "candidates": candidates,
                 "calibratedSeconds": estimates, "candidateOutcomes": expected,
                 "completionP50Seconds": statistics.median(completed),
                 "completionP95Seconds": sorted(completed)[math.ceil(0.95 * jobs) - 1],
@@ -260,7 +274,8 @@ def scaling_summary(records, seed):
 async def main(args):
     corpus, project, runtime = args.corpus.resolve(), args.project.resolve(), args.runtime.resolve()
     tasks = [task for task in json.loads(corpus.read_text())
-             if task["project"] == project.name and len(task["steps"]) <= args.max_steps][:args.limit]
+             if task["project"] == project.name and len(task["steps"]) <= args.max_steps
+             and (not args.theorems or task["theorem"] in args.theorems)][:args.limit]
     assert tasks, "No matching corpus tasks"
     args.output.mkdir(parents=True, exist_ok=False)
     sources = {task["file"]: digest(project / task["file"]) for task in tasks}
@@ -278,9 +293,10 @@ async def main(args):
                                  f"beam-snapshot-worker:{variant}") for variant in ("a", "b")],
               "selectedTasks": [task["theorem"] for task in tasks],
               "phases": args.phases,
-              "scalingWorkload": "Repeated original/simp/linarith candidates at each initial proof state; not a search trace",
+              "scalingWorkload": "Repeated original and configured tactics at each initial proof state; not a search trace",
+              "tactics": args.tactics,
               "seed": args.seed, "repeat": args.repeat, "batchJobs": args.batch_jobs,
-              "transferPrior": {"copySeconds": 1.0, "exportSeconds": 0.25},
+              "transferPrior": {"copySeconds": args.copy_seconds, "exportSeconds": args.source_stall_seconds},
               "hostLoadAtStart": os.getloadavg(),
               "migration": [], "scheduled": [], "scaling": []}
     try:
@@ -299,17 +315,23 @@ async def main(args):
             report["transferProfileSha256"] = digest(args.transfer_profile)
             report["profileCopySeconds"] = sum(step["copySeconds"] for step in samples)
         opened = time.monotonic()
+        report["documentOpenSeconds"] = {}
         for name in sources:
             print(f"open: {name}", flush=True)
+            document_started = time.monotonic()
             await asyncio.gather(*(peer.call("open", {"path": name}) for peer in cluster.peers))
+            report["documentOpenSeconds"][name] = time.monotonic() - document_started
         report["openSeconds"] = time.monotonic() - opened
         if "pinned" in args.phases:
-            report["scheduled"].append(await scheduled_replay(cluster.peers, tasks, False))
+            report["scheduled"].append(await scheduled_replay(cluster.peers, tasks, False, args.tactics,
+                                                            report["transferPrior"]))
         if "migration" in args.phases:
             for task in tasks:
-                report["migration"].append(await migration_check(cluster.peers, task))
+                report["migration"].append(await migration_check(cluster.peers, task, args.tactics))
+                (args.output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
         if "stealing" in args.phases:
-            report["scheduled"].append(await scheduled_replay(cluster.peers, tasks, True))
+            report["scheduled"].append(await scheduled_replay(cluster.peers, tasks, True, args.tactics,
+                                                            report["transferPrior"]))
         if "scaling" in args.phases:
             rng = random.Random(args.seed)
             orders = list(itertools.permutations(("serial", "pinned", "stealing")))
@@ -320,7 +342,7 @@ async def main(args):
                     for trial, order in enumerate(orders[:args.repeat]):
                         for mode in order:
                             run = await branch_batch(cluster.peers, task, mode, jobs, args.seed + trial,
-                                                     report["transferPrior"])
+                                                     report["transferPrior"], args.tactics)
                             run["trial"] = trial
                             report["scaling"].append(run)
                             print(json.dumps(run), flush=True)
@@ -357,15 +379,29 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--limit", type=int, default=4)
     parser.add_argument("--max-steps", type=int, default=3)
+    parser.add_argument("--theorems", nargs="+", help="Select named theorems before applying the task limit")
+    parser.add_argument("--tactics", type=Path,
+                        help="JSON array of alternative tactic strings; the original step is always included")
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--repeat", type=int, default=6)
     parser.add_argument("--seed", type=int, default=17)
     parser.add_argument("--batch-jobs", type=int, nargs="+", default=[3, 192])
     parser.add_argument("--transfer-profile", type=Path,
                         help="Seed copy/export estimates from a separate passing migration report")
+    parser.add_argument("--copy-seconds", type=float, default=1.0,
+                        help="Initial total copy estimate; overridden by --transfer-profile")
+    parser.add_argument("--source-stall-seconds", type=float, default=0.25,
+                        help="Initial source export stall estimate; overridden by --transfer-profile")
     parser.add_argument("--phases", nargs="+", choices=["pinned", "migration", "stealing", "scaling"],
                         default=["pinned", "migration", "stealing"])
     args = parser.parse_args()
+    args.tactics = json.loads(args.tactics.read_text()) if args.tactics else ["simp", "linarith"]
+    if not isinstance(args.tactics, list) or any(not isinstance(t, str) or not t.strip()
+                                               for t in args.tactics):
+        parser.error("tactics must be a JSON array of nonempty strings")
+    if any(not math.isfinite(value) or value < 0
+           for value in (args.copy_seconds, args.source_stall_seconds)):
+        parser.error("transfer estimates must be finite and nonnegative")
     if args.workers < 2 or min(args.repeat, args.limit, args.max_steps, *args.batch_jobs) <= 0:
         parser.error("at least two workers and positive workload sizes are required")
     if max(args.batch_jobs) > 4096:

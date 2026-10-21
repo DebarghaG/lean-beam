@@ -26,8 +26,8 @@ owning request families under `Beam.LSP.*`.
 initialize
   registerLspRequestHandler RunAt.Transfer.contextMethod RunAt.Transfer.ContextParams RunAt.Transfer.Context
     RunAt.Transfer.describe
-  registerLspRequestHandler RunAt.Transfer.exportMethod RunAt.Transfer.ExportParams RunAt.Transfer.Context
-    RunAt.Transfer.exportHandle
+  registerLspRequestHandler RunAt.Transfer.exportMethod RunAt.Transfer.ExportParams
+    RunAt.Transfer.ExportResult RunAt.Transfer.exportHandle
   registerLspRequestHandler RunAt.Transfer.importMethod RunAt.Transfer.ImportParams RunAt.Handle
     RunAt.Transfer.importHandle
   registerLspRequestHandler Beam.LSP.RunAt.method Beam.LSP.RunAt.Params Beam.LSP.RunAt.Result

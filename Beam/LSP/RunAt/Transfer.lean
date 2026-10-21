@@ -39,6 +39,11 @@ structure Context where
   processId : Nat
   deriving FromJson, ToJson
 
+structure ExportResult extends Context where
+  preparationNanos : Nat
+  saveNanos : Nat
+  deriving FromJson, ToJson
+
 private def context (env : Environment) : RequestM Context := do
   return {
     identity := ← identity env
@@ -112,11 +117,12 @@ private partial def completedTokens (tree : Language.SnapshotTree)
       tokens := tokens.push tk
   return tokens
 
-def exportHandle (p : ExportParams) : RequestM (RequestTask Context) := do
+def exportHandle (p : ExportParams) : RequestM (RequestTask ExportResult) := do
   requireDocumentVersion p.textDocument
   withStoredHandle p.handle false fun stored => do
     withRunAtSnapAtPos ⟨0, 0⟩ fun localHeader => do
       try
+        let started ← IO.monoNanosNow
         let snapshot ← match stored.state with
           | .proof snapshot => pure snapshot
           | .importedProof owner => pure (ImportedSnapshot.data owner)
@@ -133,9 +139,13 @@ def exportHandle (p : ExportParams) : RequestM (RequestTask Context) := do
           ⟨{ diagnostics := .empty }, snapshot.coreState.snapshotTasks⟩ tokens
         checkRequestCancelled
         for tk in tokens do tk.set
+        let prepared ← IO.monoNanosNow
         save p.path snapshot
+        let saved ← IO.monoNanosNow
         checkRequestCancelled
-        return stamp
+        return { toContext := stamp
+                 preparationNanos := prepared - started
+                 saveNanos := saved - prepared }
       finally
         stored.state.keepAlive
 

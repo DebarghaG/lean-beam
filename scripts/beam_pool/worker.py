@@ -6,6 +6,7 @@ code-bearing artifacts, admitted only after exact runtime and dependency hash ch
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 import hashlib
 import hmac
 import os
@@ -18,6 +19,16 @@ import zlib
 
 from .lsp import Lsp, RpcError
 from .wire import MAX_BODY, read_frame, write_frame
+
+
+@contextmanager
+def timed(stages, name):
+    """Record wall time for one non-overlapping transfer stage, including awaits."""
+    started = time.monotonic()
+    try:
+        yield
+    finally:
+        stages[name] = time.monotonic() - started
 
 
 def digest_file(path):
@@ -192,63 +203,89 @@ class Worker:
             return {}, b""
         if op == "export":
             started = time.monotonic()
+            stages = {}
             handle = self.resolve(p["handle"], relative)
             path = Path(self.temp.name) / (uuid.uuid4().hex + ".snapshot")
             try:
-                context = await self.call_lsp("$/lean/beam/exportSnapshot", {
-                    "textDocument": doc, "handle": handle, "path": str(path),
-                })
+                with timed(stages, "nativeExport"):
+                    context = await self.call_lsp("$/lean/beam/exportSnapshot", {
+                        "textDocument": doc, "handle": handle, "path": str(path),
+                    })
                 size = path.stat().st_size
                 if size > self.memory_limit:
                     raise ValueError("snapshot exceeds worker snapshot memory budget")
-                data = await asyncio.to_thread(zlib.compress, path.read_bytes(), 1)
+                with timed(stages, "read"):
+                    raw = path.read_bytes()
+                with timed(stages, "compress"):
+                    data = await asyncio.to_thread(zlib.compress, raw, 1)
+                del raw
                 if len(data) > MAX_BODY:
                     raise ValueError("compressed snapshot exceeds transfer limit")
+                with timed(stages, "dependencies"):
+                    dependencies = self.dependency_hashes(context["regions"])
+                with timed(stages, "libraries"):
+                    libraries = self.loaded_libraries(context)
+                with timed(stages, "checksum"):
+                    checksum = hashlib.sha256(data).hexdigest()
                 manifest = {"identity": context["identity"],
-                            "dependencies": self.dependency_hashes(context["regions"]),
-                            "libraries": self.loaded_libraries(context),
+                            "dependencies": dependencies, "libraries": libraries,
                             "encoding": "zlib", "uncompressedBytes": size,
-                            "sha256": hashlib.sha256(data).hexdigest()}
+                            "sha256": checksum, "exportStagesSeconds": stages,
+                            "nativeExportStagesSeconds": {
+                                "preparation": context["preparationNanos"] / 1e9,
+                                "save": context["saveNanos"] / 1e9}}
                 manifest["exportSeconds"] = time.monotonic() - started
                 return manifest, data
             finally:
                 path.unlink(missing_ok=True)
         if op == "import":
+            started = time.monotonic()
+            stages = {}
             manifest = p["manifest"]
-            if hashlib.sha256(body).hexdigest() != manifest["sha256"]:
-                raise ValueError("snapshot checksum mismatch")
+            with timed(stages, "checksum"):
+                if hashlib.sha256(body).hexdigest() != manifest["sha256"]:
+                    raise ValueError("snapshot checksum mismatch")
             size = manifest["uncompressedBytes"]
             if manifest["encoding"] != "zlib" or type(size) is not int or size <= 0:
                 raise ValueError("invalid snapshot encoding or size")
-            context = await self.call_lsp("$/lean/beam/snapshotContext", {"textDocument": doc})
+            with timed(stages, "context"):
+                context = await self.call_lsp("$/lean/beam/snapshotContext", {"textDocument": doc})
             differences = []
             for key in set(manifest["identity"]) | set(context["identity"]):
                 if manifest["identity"].get(key) != context["identity"].get(key):
                     differences.append(f"identity.{key}")
-            if manifest["dependencies"] != self.dependency_hashes(context["regions"]):
-                differences.append("dependencies")
-            if manifest["libraries"] != self.loaded_libraries(context):
-                differences.append("loadedLibraries")
+            with timed(stages, "dependencies"):
+                if manifest["dependencies"] != self.dependency_hashes(context["regions"]):
+                    differences.append("dependencies")
+            with timed(stages, "libraries"):
+                if manifest["libraries"] != self.loaded_libraries(context):
+                    differences.append("loadedLibraries")
             if differences:
                 raise RpcError({"code": "incompatibleSnapshot", "message":
                                 "snapshot runtime, document, or dependencies differ: " + ", ".join(sorted(differences))})
             # Lean's LSP starts a file process for each document. Account for all of
             # them, not just the process receiving this import.
-            resident = {context["processId"]: context["residentBytes"]}
-            for other, _ in self.documents.values():
-                if other != doc:
-                    usage = await self.call_lsp("$/lean/beam/snapshotContext", {"textDocument": other})
-                    resident[usage["processId"]] = usage["residentBytes"]
-            if sum(resident.values()) + size > self.memory_limit:
-                raise ValueError("worker snapshot memory budget exhausted")
-            raw = await asyncio.to_thread(decompress_snapshot, body, size)
+            with timed(stages, "residentCheck"):
+                resident = {context["processId"]: context["residentBytes"]}
+                for other, _ in self.documents.values():
+                    if other != doc:
+                        usage = await self.call_lsp("$/lean/beam/snapshotContext", {"textDocument": other})
+                        resident[usage["processId"]] = usage["residentBytes"]
+                if sum(resident.values()) + size > self.memory_limit:
+                    raise ValueError("worker snapshot memory budget exhausted")
+            with timed(stages, "decompress"):
+                raw = await asyncio.to_thread(decompress_snapshot, body, size)
             path = Path(self.temp.name) / (uuid.uuid4().hex + ".snapshot")
             try:
-                path.write_bytes(raw)
-                handle = await self.call_lsp("$/lean/beam/importSnapshot", {
-                    "textDocument": doc, "path": str(path), "identity": manifest["identity"],
-                })
-                return {"handle": self.retain(handle, relative)}, b""
+                with timed(stages, "write"):
+                    path.write_bytes(raw)
+                del raw
+                with timed(stages, "nativeImport"):
+                    handle = await self.call_lsp("$/lean/beam/importSnapshot", {
+                        "textDocument": doc, "path": str(path), "identity": manifest["identity"],
+                    })
+                return {"handle": self.retain(handle, relative), "importStagesSeconds": stages,
+                        "importSeconds": time.monotonic() - started}, b""
             finally:
                 path.unlink(missing_ok=True)
         raise ValueError(f"unknown worker operation: {op}")

@@ -300,3 +300,30 @@ well as throughput, tail latency, transfer bytes, and CPU-hours. Separate warm s
 document/runtime setup. Sweep worker count and queue width, and include balanced queues, skewed queues,
 and sequential chains. Same-machine containers establish process isolation and a local cost model;
 cross-host runs must measure their actual bandwidth and latency before claiming distributed scaling.
+
+### Transfer stages and configurable workloads
+
+Worker export replies include `exportStagesSeconds` for `nativeExport`, `read`, `compress`,
+`dependencies`, `libraries`, and `checksum`. Import replies include `importStagesSeconds` for
+`checksum`, `context`, `dependencies`, `libraries`, `residentCheck`, `decompress`, `write`, and
+`nativeImport`, along with `importSeconds`. These are non-overlapping wall-clock measurements.
+The native stages include the LSP round trip and native request preparation. Within native export,
+`nativeExportStagesSeconds` separates `preparation` (identity and completed-reporting checks) from
+`save` (Lean's compacted-region save and compactor cleanup). These are wall times, not CPU times,
+and are subdivisions of `nativeExport`, not additional costs. The corpus migration report records `exportRpcSeconds` and the
+complete `copySeconds`. The remainder outside worker export/import includes transport, queueing,
+framing, and cleanup; it is not a measurement of network time alone.
+
+Use `--tactics FILE.json` with a JSON array of alternative tactic strings to vary the workload.
+The original corpus tactic is always included, and source files remain read-only. The
+[bounded automation set](benchmarks/snapshot-tactics-bounded.json) includes simplification,
+arithmetic, and heartbeat-limited search. A rejected tactic is a measured evaluation, not a solved
+proof. Migration compares local/imported outcomes; scaling compares every result with calibration.
+Each scaling run records the exact candidates, calibration cost, and parent setup cost separately
+from the timed batch. `documentOpenSeconds` records concurrent worker preparation per file.
+
+`--theorems NAME ...` selects tasks before `--limit`; `--max-steps` controls the accepted proof
+length. Use `--copy-seconds C --source-stall-seconds S` to exercise the existing scheduler parameters.
+A supplied `--transfer-profile` overrides both values with its measured medians. These options
+permit sensitivity tests across projects, tactic mixes, and queue sizes without changing the
+scheduling algorithm or requiring a particular agent trace.
