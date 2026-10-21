@@ -98,6 +98,20 @@ private unsafe def loadUnsafe (path : System.FilePath) (regions : Array Compacte
 @[implemented_by loadUnsafe]
 private opaque load (path : System.FilePath) (regions : Array CompactedRegion) : IO StoredHandleState
 
+-- Like Lean.Elab.Frontend's incremental-save preparation, settle cancellation promises
+-- retained by diagnostic trees (including trees cached inside environment realizations).
+-- First collect and check the entire tree: never cancel unfinished elaboration to export it.
+private partial def completedTokens (tree : Language.SnapshotTree)
+    (tokens : Array IO.CancelToken := #[]) : IO (Array IO.CancelToken) := do
+  let mut tokens := tokens
+  for child in tree.children do
+    let some finished ← child.get?
+      | throw <| IO.userError "snapshot export requires completed document and proof reporting"
+    tokens ← completedTokens finished tokens
+    if let some tk := child.cancelTk? then
+      tokens := tokens.push tk
+  return tokens
+
 def exportHandle (p : ExportParams) : RequestM (RequestTask Context) := do
   requireDocumentVersion p.textDocument
   withStoredHandle p.handle false fun stored => do
@@ -113,6 +127,12 @@ def exportHandle (p : ExportParams) : RequestM (RequestTask Context) := do
         let stamp ← context localHeader.env
         unless stamp.identity == (← identity snapshot.coreState.env) do
           throw <| RequestError.invalidParams "snapshot import environment differs from the document"
+        let doc ← RequestM.readDoc
+        let tokens ← completedTokens (Language.toSnapshotTree doc.initSnap)
+        let tokens ← completedTokens
+          ⟨{ diagnostics := .empty }, snapshot.coreState.snapshotTasks⟩ tokens
+        checkRequestCancelled
+        for tk in tokens do tk.set
         save p.path snapshot
         checkRequestCancelled
         return stamp

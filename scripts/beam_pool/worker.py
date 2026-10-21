@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 import time
 import uuid
+import zlib
 
 from .lsp import Lsp, RpcError
 from .wire import MAX_BODY, read_frame, write_frame
@@ -22,6 +23,15 @@ from .wire import MAX_BODY, read_frame, write_frame
 def digest_file(path):
     with Path(path).open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def decompress_snapshot(data, size):
+    """Decode one complete stream, allocating at most its admitted size plus one byte."""
+    decoder = zlib.decompressobj()
+    raw = decoder.decompress(data, size + 1)
+    if len(raw) != size or not decoder.eof or decoder.unused_data or decoder.unconsumed_tail:
+        raise ValueError("snapshot compressed size or stream differs from manifest")
+    return raw
 
 
 def runtime_digest(project, plugin):
@@ -188,12 +198,16 @@ class Worker:
                 context = await self.call_lsp("$/lean/beam/exportSnapshot", {
                     "textDocument": doc, "handle": handle, "path": str(path),
                 })
-                if path.stat().st_size > MAX_BODY:
-                    raise ValueError("snapshot exceeds transfer limit")
-                data = path.read_bytes()
+                size = path.stat().st_size
+                if size > self.memory_limit:
+                    raise ValueError("snapshot exceeds worker snapshot memory budget")
+                data = await asyncio.to_thread(zlib.compress, path.read_bytes(), 1)
+                if len(data) > MAX_BODY:
+                    raise ValueError("compressed snapshot exceeds transfer limit")
                 manifest = {"identity": context["identity"],
                             "dependencies": self.dependency_hashes(context["regions"]),
                             "libraries": self.loaded_libraries(context),
+                            "encoding": "zlib", "uncompressedBytes": size,
                             "sha256": hashlib.sha256(data).hexdigest()}
                 manifest["exportSeconds"] = time.monotonic() - started
                 return manifest, data
@@ -203,6 +217,9 @@ class Worker:
             manifest = p["manifest"]
             if hashlib.sha256(body).hexdigest() != manifest["sha256"]:
                 raise ValueError("snapshot checksum mismatch")
+            size = manifest["uncompressedBytes"]
+            if manifest["encoding"] != "zlib" or type(size) is not int or size <= 0:
+                raise ValueError("invalid snapshot encoding or size")
             context = await self.call_lsp("$/lean/beam/snapshotContext", {"textDocument": doc})
             differences = []
             for key in set(manifest["identity"]) | set(context["identity"]):
@@ -222,11 +239,12 @@ class Worker:
                 if other != doc:
                     usage = await self.call_lsp("$/lean/beam/snapshotContext", {"textDocument": other})
                     resident[usage["processId"]] = usage["residentBytes"]
-            if sum(resident.values()) + len(body) > self.memory_limit:
+            if sum(resident.values()) + size > self.memory_limit:
                 raise ValueError("worker snapshot memory budget exhausted")
+            raw = await asyncio.to_thread(decompress_snapshot, body, size)
             path = Path(self.temp.name) / (uuid.uuid4().hex + ".snapshot")
             try:
-                path.write_bytes(body)
+                path.write_bytes(raw)
                 handle = await self.call_lsp("$/lean/beam/importSnapshot", {
                     "textDocument": doc, "path": str(path), "identity": manifest["identity"],
                 })

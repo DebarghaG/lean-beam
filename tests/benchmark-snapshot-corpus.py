@@ -9,10 +9,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import itertools
 import json
+import math
 import os
 from pathlib import Path
+import random
 import secrets
+import statistics
 import subprocess
 import sys
 import time
@@ -37,8 +41,9 @@ def outcome(result):
 
 
 class Cluster:
-    def __init__(self, project, runtime):
+    def __init__(self, project, runtime, workers=2):
         self.project, self.runtime = project.resolve(), runtime.resolve()
+        self.workers = workers
         self.names, self.peers = [], []
         self.token = secrets.token_hex(32)
 
@@ -49,7 +54,8 @@ class Cluster:
                                         cwd=self.project))
         def mapped(value):
             return value.replace(str(self.project), "/project").replace(sdk, "/opt/lean")
-        for variant in ("a", "b"):
+        for index in range(self.workers):
+            variant = "a" if index % 2 == 0 else "b"
             name = "beam-corpus-" + uuid.uuid4().hex[:12]
             args = ["docker", "run", "--rm", "-d", "--name", name,
                     "--user", f"{os.getuid()}:{os.getgid()}",
@@ -133,7 +139,9 @@ async def migration_check(peers, task):
         await call(peers[owner], "release", task, handle=parent)
         await call(peers[destination], "release", task, handle=imported["handle"])
         parent, owner = advanced["handle"], destination
-        records.append({"step": index, "snapshotBytes": len(data), "copySeconds": copy_seconds,
+        records.append({"step": index, "snapshotBytes": manifest["uncompressedBytes"],
+                        "wireBytes": len(data), "exportSeconds": manifest["exportSeconds"],
+                        "copySeconds": copy_seconds,
                         "comparisons": comparisons})
         print(f"  step {index + 1}: candidate agreement, {len(data)} bytes transferred", flush=True)
     assert advanced["proofState"]["goals"] == [], advanced
@@ -172,6 +180,81 @@ async def scheduled_replay(peers, tasks, stealing):
         await pool.close()
 
 
+async def branch_batch(peers, task, mode, jobs, seed):
+    """Repeat frozen, real candidates to isolate scheduling throughput on one proof state.
+
+    This deliberate fan-out is a scaling microbenchmark, not a recorded search trace.
+    Each trial starts with a new parent, coordinator, and empty export/replica cache.
+    """
+    pool = await Pool(peers[:1] if mode == "serial" else peers,
+                      stealing=mode == "stealing", seed=seed).start()
+    try:
+        parent = (await pool.run_at(task["file"], task["proof_start"], task["indent"], "skip"))["handle"]
+        candidates = [task["steps"][0]["text"], "simp", "linarith"]
+        expected, estimates = [], []
+        # Identical untimed calibration in all modes; never inflate estimates to force a steal.
+        for text in candidates:
+            samples = []
+            outcomes = []
+            for _ in range(3):
+                started = time.monotonic()
+                result = await pool.run_with(parent, text)
+                samples.append(time.monotonic() - started)
+                outcomes.append(outcome(result))
+            assert all(value == outcomes[0] for value in outcomes)
+            estimates.append(statistics.median(samples))
+            expected.append(outcome(result))
+        counts_before = list(pool.metrics["completedByWorker"])
+        completed = []
+        started = time.monotonic()
+        futures = [pool.submit(parent, candidates[i % 3], estimate=estimates[i % 3])
+                   for i in range(jobs)]
+        for future in futures:
+            future.add_done_callback(lambda _: completed.append(time.monotonic() - started))
+        results = await asyncio.gather(*futures)
+        elapsed = time.monotonic() - started
+        assert all(outcome(result) == expected[i % 3] for i, result in enumerate(results))
+        metrics = dict(pool.metrics)
+        metrics["completedByWorker"] = [after - before for after, before in
+                                         zip(metrics["completedByWorker"], counts_before)]
+        await pool.release(parent)
+        return {"theorem": task["theorem"], "mode": mode, "jobs": jobs, "seconds": elapsed,
+                "calibratedSeconds": estimates, "candidateOutcomes": expected,
+                "completionP50Seconds": statistics.median(completed),
+                "completionP95Seconds": sorted(completed)[math.ceil(0.95 * jobs) - 1],
+                "metrics": metrics}
+    finally:
+        await pool.close()
+
+
+def scaling_summary(records, seed):
+    """Paired ratios, with a reproducible percentile bootstrap over complete trial pairs."""
+    summaries = []
+    groups = sorted({(run["theorem"], run["jobs"]) for run in records})
+    for theorem, jobs in groups:
+        runs = [run for run in records if (run["theorem"], run["jobs"]) == (theorem, jobs)]
+        paired = {}
+        for run in runs:
+            paired.setdefault(run["trial"], {})[run["mode"]] = run
+        assert all(set(pair) == {"serial", "pinned", "stealing"} for pair in paired.values())
+        assert all(run["candidateOutcomes"] == runs[0]["candidateOutcomes"] for run in runs)
+        ratios = [pair["pinned"]["seconds"] / pair["stealing"]["seconds"]
+                  for pair in paired.values()]
+        rng = random.Random(seed)
+        bootstrap = sorted(math.exp(statistics.mean(math.log(rng.choice(ratios))
+                           for _ in ratios)) for _ in range(10000))
+        summaries.append({"theorem": theorem, "jobs": jobs, "pairedSpeedups": ratios,
+                          "geometricMeanSpeedup": statistics.geometric_mean(ratios),
+                          "pairedBootstrap95Percent": ([bootstrap[250], bootstrap[9749]]
+                                                       if len(ratios) > 1 else None),
+                          "medianSeconds": {mode: statistics.median(run["seconds"] for run in runs
+                                             if run["mode"] == mode)
+                                            for mode in ("serial", "pinned", "stealing")},
+                          "everyStealingTrialMigrated": all(pair["stealing"]["metrics"]["imports"] > 0
+                                                            for pair in paired.values())})
+    return summaries
+
+
 async def main(args):
     corpus, project, runtime = args.corpus.resolve(), args.project.resolve(), args.runtime.resolve()
     tasks = [task for task in json.loads(corpus.read_text())
@@ -179,7 +262,7 @@ async def main(args):
     assert tasks, "No matching corpus tasks"
     args.output.mkdir(parents=True, exist_ok=False)
     sources = {task["file"]: digest(project / task["file"]) for task in tasks}
-    cluster = Cluster(project, runtime)
+    cluster = Cluster(project, runtime, args.workers)
     report = {"beamCommit": command("git", "rev-parse", "HEAD", cwd=ROOT),
               "runnerSha256": digest(__file__),
               "workerSourcesSha256": {str(path.relative_to(ROOT)): digest(path)
@@ -188,12 +271,15 @@ async def main(args):
               "toolchain": (project / "lean-toolchain").read_text().strip(),
               "corpusSha256": digest(corpus), "sources": sources,
               "pluginSha256": digest(runtime / ".lake/build/lib/libbeam_Beam_LSP.so"),
-              "workers": 2, "cpusPerWorker": 2, "memoryGiBPerWorker": 8,
+              "workers": args.workers, "cpusPerWorker": 2, "memoryGiBPerWorker": 8,
               "images": [command("docker", "image", "inspect", "--format", "{{.Id}}",
                                  f"beam-snapshot-worker:{variant}") for variant in ("a", "b")],
               "selectedTasks": [task["theorem"] for task in tasks],
               "phases": args.phases,
-              "migration": [], "scheduled": []}
+              "scalingWorkload": "Repeated original/simp/linarith candidates at each initial proof state; not a search trace",
+              "seed": args.seed, "repeat": args.repeat, "batchJobs": args.batch_jobs,
+              "hostLoadAtStart": os.getloadavg(),
+              "migration": [], "scheduled": [], "scaling": []}
     try:
         await cluster.start()
         report["runtime"] = (await cluster.peers[0].call("status"))[0]["runtime"]
@@ -209,6 +295,21 @@ async def main(args):
                 report["migration"].append(await migration_check(cluster.peers, task))
         if "stealing" in args.phases:
             report["scheduled"].append(await scheduled_replay(cluster.peers, tasks, True))
+        if "scaling" in args.phases:
+            rng = random.Random(args.seed)
+            orders = list(itertools.permutations(("serial", "pinned", "stealing")))
+            orders *= math.ceil(args.repeat / len(orders))
+            rng.shuffle(orders)
+            for task in tasks:
+                for jobs in args.batch_jobs:
+                    for trial, order in enumerate(orders[:args.repeat]):
+                        for mode in order:
+                            run = await branch_batch(cluster.peers, task, mode, jobs, args.seed + trial)
+                            run["trial"] = trial
+                            report["scaling"].append(run)
+                            print(json.dumps(run), flush=True)
+                            (args.output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
+            report["scalingSummary"] = scaling_summary(report["scaling"], args.seed)
         if len(report["scheduled"]) == 2:
             assert report["scheduled"][0]["tasks"] == report["scheduled"][1]["tasks"]
         if report["scheduled"]:
@@ -240,6 +341,15 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--limit", type=int, default=4)
     parser.add_argument("--max-steps", type=int, default=3)
-    parser.add_argument("--phases", nargs="+", choices=["pinned", "migration", "stealing"],
+    parser.add_argument("--workers", type=int, default=2)
+    parser.add_argument("--repeat", type=int, default=6)
+    parser.add_argument("--seed", type=int, default=17)
+    parser.add_argument("--batch-jobs", type=int, nargs="+", default=[3, 192])
+    parser.add_argument("--phases", nargs="+", choices=["pinned", "migration", "stealing", "scaling"],
                         default=["pinned", "migration", "stealing"])
-    asyncio.run(main(parser.parse_args()))
+    args = parser.parse_args()
+    if args.workers < 2 or min(args.repeat, args.limit, args.max_steps, *args.batch_jobs) <= 0:
+        parser.error("at least two workers and positive workload sizes are required")
+    if max(args.batch_jobs) > 4096:
+        parser.error("batch size exceeds the pool queue budget")
+    asyncio.run(main(args))

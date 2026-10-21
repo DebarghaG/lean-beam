@@ -5,16 +5,20 @@ upstream Lean Beam implementation, using the existing `runAt`, `runWith`, and ha
 semantics. The coordinator is a small Python library; workers communicate over TCP and call Beam's
 LSP plugin. The installed CLI and MCP interfaces continue to use the local broker.
 
-A limited `beam-bench` replay passes locally, but exporting the first tested corpus proof currently
-stalls in its elaboration environment. Corpus migration remains blocked; see the
-[corpus sanity check](#corpus-sanity-check) below.
+A limited `beam-bench` replay now passes both locally and after snapshot migration. Real corpus
+snapshots are much larger and slower to copy than the synthetic fixtures; see the
+[corpus evaluation](#corpus-evaluation) below.
 
 ## State transfer
 
 Beam retains the complete core, meta, term, and tactic state. Export uses Lean's
 `CompactedRegion.save` with closure relocation, the same machinery used by Lean's incremental
 snapshots. Imported module regions are dependencies of the snapshot, rather than serialized again.
-Only request cancellation and editor reporting state are cleared. Proof environments, local
+Before export, Beam checks that document and proof reporting tasks have finished, then resolves
+their cancellation tokens using the same preparation as Lean's incremental snapshot saver. This
+also settles tokens retained inside cached realization results. Unfinished reporting rejects export
+before any token is changed. Each resumed request receives fresh cancellation state.
+Request cancellation and top-level editor reporting state are cleared. Proof environments, local
 instances, universe parameters, name generators, and extension state remain in the object graph.
 No tactic replay or process checkpointing is involved.
 
@@ -122,8 +126,14 @@ them. A source command handle stays pinned if export is rejected. Distributed li
 consumption is not exposed: this interface accepts reusable continuations only. Source changes
 require a new worker generation; the normal local Beam edit/sync APIs remain available separately.
 
-Defaults bound the queue to 4,096 jobs, the coordinator's export cache to 256 MiB, each worker to
-4,096 handles, 16 open documents and 256 MiB of imported mappings, and a single transfer to 128 MiB.
+Snapshots use standard zlib compression at level 1 for transport. The checksum covers the encoded
+bytes; import verifies it, admits the declared uncompressed size against the mapping budget, and
+requires one complete stream of exactly that size. Decompression output is bounded before allocation
+can exceed the admitted size. Compression changes neither Lean's native format nor the proof state.
+
+Defaults bound the queue to 4,096 jobs, the coordinator's compressed export cache to 256 MiB, each worker
+to 4,096 handles, 16 open documents and 256 MiB of uncompressed imported mappings, and a single
+compressed transfer to 128 MiB. Exports must also fit the worker's snapshot memory budget.
 Documents without retained handles are evicted when needed. Mapping admission counts all file
 processes belonging to the worker. These bounds do not
 cap arbitrary tactic heap allocation; use container/process memory limits too. Cache eviction drops
@@ -176,7 +186,7 @@ Greenbeam corpus, establish cross-machine WAN performance, or provide an MLSys e
 search traces, larger imported environments, skewed task durations, and heterogeneous workers need
 separate measurements before making those claims.
 
-## Corpus sanity check
+## Corpus evaluation
 
 The [2026-10-21 corpus report](benchmarks/snapshot-corpus-sanity-2026-10-21.json) samples four
 three-step proofs from two `PrimeNumberTheoremAnd` files in `beam-bench/work/tasks.json`, using
@@ -188,12 +198,21 @@ All 36 candidate outcomes agreed, including 11 rejected alternatives. The small 
 stayed local, with zero exports or imports. Warm replay took 1.961 s and 1.688 s, respectively;
 this single ordered run does not establish a speedup.
 
-An explicit migration check failed before sending a snapshot: export of the initial handle for
-`meisselMertensConstant_identity` exceeded the worker's 120-second request deadline. A separate
-30-second diagnostic probe serialized the core context and checked kernel environment, then stalled
-while serializing the complete elaboration environment. The exact retained object responsible is
-not yet identified. The diagnostic build was temporary; the production snapshot representation was
-not changed. Successful local replay therefore does not establish transfer support for this corpus.
+The initial migration failure was inside serialization, before network transfer. The elaboration
+environment retained four unresolved cancellation promises through cached realization diagnostics.
+Lean's compactor waits for task results, so merely removing the top-level cancellation token did
+not suffice. A temporary graph diagnostic identified these promises; no graph walker or private
+environment-field manipulation is part of the implementation. Completing reporting tokens as
+described above removes the stall. A small regression fixture times out with the former exporter
+and passes with the preparation step; a second test checks that unfinished work is rejected without
+cancelling it.
+
+The first resulting native snapshot was 220,474,028 bytes, exceeding the existing 128 MiB wire limit.
+Compression reduces its transfer to about 46.6 MB. The
+[migration report](benchmarks/snapshot-corpus-migration-2026-10-21.json) records all four proofs solved
+after 12 transfers, with all 36 local/imported candidate outcomes agreeing and all imported mappings
+released. Copies took 6.5–8.6 seconds on this machine. That cost matters: a handful of cheap branches
+cannot amortize migration.
 
 To reproduce with the prepared corpus and a Beam plugin built for its exact toolchain:
 
@@ -206,6 +225,30 @@ python3 tests/benchmark-snapshot-corpus.py \
 ```
 
 The default phases are pinned replay, explicit migration, and stealing-enabled replay. Use
-`--phases pinned stealing` to run the passing replay comparison separately, or
-`--phases migration --limit 1` for the bounded export reproduction. The harness writes a report and
-worker logs even when a phase fails, and never overwrites an existing output directory.
+`--phases migration --limit 1` for a bounded migration check. The harness writes a report and worker
+logs even when a phase fails, and never overwrites an existing output directory.
+
+For controlled throughput measurements, add `--phases migration scaling --limit 1 --repeat 6
+--batch-jobs 3 384`. The scaling phase repeats the three frozen candidates at the same initial proof
+state. This is an explicit fan-out microbenchmark using real tactics and environments, not a search
+trace or an end-to-end theorem-proving result. It compares:
+
+- one active worker;
+- the same multi-worker allocation with affinity pinned to the parent;
+- that allocation with work stealing enabled.
+
+Every run creates a fresh parent and coordinator, with empty export and replica caches. The same
+untimed calibration estimates candidate costs in every mode. Timed completion includes scheduling,
+export, compression, network transfer, import, and all candidate responses. File opening and handle
+setup are reported separately from the measured batch. Six trials balance all mode-order permutations;
+the random seed, source/runtime fingerprints, per-trial timings, candidate agreement, and transfer
+counts are recorded. Reports include paired pinned/stealing ratios and a descriptive 95% bootstrap
+interval over trial pairs. A speedup attributed to migration requires actual imports in every
+stealing trial. Three cheap candidates provide the control where copies should be avoided.
+
+For a broader evaluation, replay a fixed real search trace with unique candidates and dependencies,
+then run live search at identical model and tactic budgets. Report time to proof and solved count as
+well as throughput, tail latency, transfer bytes, and CPU-hours. Separate warm search time from cold
+document/runtime setup. Sweep worker count and queue width, and include balanced queues, skewed queues,
+and sequential chains. Same-machine containers establish process isolation and a local cost model;
+cross-host runs must measure their actual bandwidth and latency before claiming distributed scaling.

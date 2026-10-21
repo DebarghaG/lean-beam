@@ -1,0 +1,1436 @@
+{
+  "beamCommit": "52efb152d3b3649aeafd1bfeb0ff812b48a2e60f",
+  "runnerSha256": "99dd47ae3358954ca7646ac649fd7354bb5dbdd12d5c17a85f8557c73d84ef7b",
+  "workerSourcesSha256": {
+    "scripts/beam_pool/__init__.py": "f5a7d09e594ad1f95193bce24f33d7819f1eaf56520df87c65c42e7b01ca53bd",
+    "scripts/beam_pool/__main__.py": "4f632913635ea715b56dbd0b5dcf59beb2bf958ddb75703aa7ed5faee5bcbd2a",
+    "scripts/beam_pool/lsp.py": "43bf03cab80ceb54414c4c598064e083600d39a8c3bac7e59415b5c8036aa4d0",
+    "scripts/beam_pool/scheduler.py": "dfe9fa74b15f15e04f7ec7ca633ba5d4c4218cb13442301733f48f7db0540e75",
+    "scripts/beam_pool/wire.py": "b1b32673d63f3d4a1361c0bcde7a135969e48626917b0508d2dfa4953ac84c3e",
+    "scripts/beam_pool/worker.py": "ab329c7747461dde0eebfac2656324e2044572907e84ee5ca7e9f54dfdce2c3d"
+  },
+  "projectCommit": "55270df807213fc3584523d09e0311d7dc073ff5",
+  "toolchain": "leanprover/lean4:v4.33.1",
+  "corpusSha256": "de639d6059e682c20f515120bb11179b5d43f824867fd39933153def70dd763c",
+  "sources": {
+    "PrimeNumberTheoremAnd/IEANTN/RosserSchoenfeld/RosserSchoenfeldPrime.lean": "d1f0ebb4c5b382440b88d2e8896bb6b94cc5bdb09f8b333e7f3d231c84682c4a",
+    "PrimeNumberTheoremAnd/IEANTN/KadiriSupport.lean": "7b0d95eba060b24a05d60c470c8b00802cdda4832c2c384dca7875652bbf7302"
+  },
+  "pluginSha256": "b08c975e35d5a2bbc60f38cfef99167541995580933170ce7dc984a1c4e6fb23",
+  "workers": 2,
+  "cpusPerWorker": 2,
+  "memoryGiBPerWorker": 8,
+  "images": [
+    "sha256:4ff7fe1eae5358174ad5ba49e4eafe5f30194f46aa14cc6d0a83ee0a12300032",
+    "sha256:877348184760225e75dc602d3d5e25eaee7e7e0a402bfa40f55f62b03b439b64"
+  ],
+  "selectedTasks": [
+    "meisselMertensConstant_identity",
+    "eq_419",
+    "kadiri_laplace_neg_line_weight_bounded_of_continuous",
+    "kadiri_laplace_neg_line_weight_deriv"
+  ],
+  "phases": [
+    "migration"
+  ],
+  "migration": [
+    {
+      "theorem": "meisselMertensConstant_identity",
+      "solved": true,
+      "steps": [
+        {
+          "step": 0,
+          "snapshotBytes": 46553492,
+          "copySeconds": 8.553373095928691,
+          "comparisons": [
+            {
+              "candidate": "original",
+              "outcome": {
+                "success": true,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "x"
+                        ],
+                        "type": "\u211d"
+                      },
+                      {
+                        "names": [
+                          "hx"
+                        ],
+                        "type": "2 \u2264 x"
+                      },
+                      {
+                        "names": [
+                          "integral_eq_loglog"
+                        ],
+                        "type": "\u222b (y : \u211d) in 2..x, 1 / y / Real.log y = Real.log (Real.log x) - Real.log (Real.log 2)"
+                      }
+                    ],
+                    "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+                  }
+                ]
+              },
+              "localSeconds": 0.27835254406090826,
+              "importedSeconds": 0.29213100695051253
+            },
+            {
+              "candidate": "simp",
+              "outcome": {
+                "success": true,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "x"
+                        ],
+                        "type": "\u211d"
+                      },
+                      {
+                        "names": [
+                          "hx"
+                        ],
+                        "type": "2 \u2264 x"
+                      }
+                    ],
+                    "target": "\u2211 x \u2264 \u230ax\u230b\u208a with Nat.Prime x, (\u2191x)\u207b\u00b9 =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 s\u207b\u00b9 / Real.log s) y"
+                  }
+                ]
+              },
+              "localSeconds": 0.039119053981266916,
+              "importedSeconds": 0.0365648060105741
+            },
+            {
+              "candidate": "linarith",
+              "outcome": {
+                "success": false,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "x"
+                        ],
+                        "type": "\u211d"
+                      },
+                      {
+                        "names": [
+                          "hx"
+                        ],
+                        "type": "2 \u2264 x"
+                      }
+                    ],
+                    "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+                  }
+                ]
+              },
+              "localSeconds": 0.036327200941741467,
+              "importedSeconds": 0.01682158699259162
+            }
+          ]
+        },
+        {
+          "step": 1,
+          "snapshotBytes": 46765524,
+          "copySeconds": 7.529740307945758,
+          "comparisons": [
+            {
+              "candidate": "original",
+              "outcome": {
+                "success": true,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "x"
+                        ],
+                        "type": "\u211d"
+                      },
+                      {
+                        "names": [
+                          "hx"
+                        ],
+                        "type": "2 \u2264 x"
+                      },
+                      {
+                        "names": [
+                          "integral_eq_loglog"
+                        ],
+                        "type": "\u222b (y : \u211d) in 2..x, 1 / y / Real.log y = Real.log (Real.log x) - Real.log (Real.log 2)"
+                      }
+                    ],
+                    "target": "Real.log (Real.log x) - Real.log (Real.log 2) + L (HDiv.hDiv 1) + 1 / x * (\u03b8 x - x) / Real.log x +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y =\n  Real.log (Real.log x) + (-Real.log (Real.log 2) + L fun x \u21a6 1 / x) + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+                  }
+                ]
+              },
+              "localSeconds": 0.04888254206161946,
+              "importedSeconds": 0.04351844103075564
+            },
+            {
+              "candidate": "simp",
+              "outcome": {
+                "success": true,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "x"
+                        ],
+                        "type": "\u211d"
+                      },
+                      {
+                        "names": [
+                          "hx"
+                        ],
+                        "type": "2 \u2264 x"
+                      },
+                      {
+                        "names": [
+                          "integral_eq_loglog"
+                        ],
+                        "type": "\u222b (y : \u211d) in 2..x, 1 / y / Real.log y = Real.log (Real.log x) - Real.log (Real.log 2)"
+                      }
+                    ],
+                    "target": "\u2211 x \u2264 \u230ax\u230b\u208a with Nat.Prime x, (\u2191x)\u207b\u00b9 =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 s\u207b\u00b9 / Real.log s) y"
+                  }
+                ]
+              },
+              "localSeconds": 0.05787125101778656,
+              "importedSeconds": 0.05877307790797204
+            },
+            {
+              "candidate": "linarith",
+              "outcome": {
+                "success": false,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "x"
+                        ],
+                        "type": "\u211d"
+                      },
+                      {
+                        "names": [
+                          "hx"
+                        ],
+                        "type": "2 \u2264 x"
+                      },
+                      {
+                        "names": [
+                          "integral_eq_loglog"
+                        ],
+                        "type": "\u222b (y : \u211d) in 2..x, 1 / y / Real.log y = Real.log (Real.log x) - Real.log (Real.log 2)"
+                      }
+                    ],
+                    "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+                  }
+                ]
+              },
+              "localSeconds": 0.024441685993224382,
+              "importedSeconds": 0.04878354608081281
+            }
+          ]
+        },
+        {
+          "step": 2,
+          "snapshotBytes": 46818149,
+          "copySeconds": 7.665830788901076,
+          "comparisons": [
+            {
+              "candidate": "original",
+              "outcome": {
+                "success": true,
+                "goals": []
+              },
+              "localSeconds": 0.03200000594370067,
+              "importedSeconds": 0.033186288084834814
+            },
+            {
+              "candidate": "simp",
+              "outcome": {
+                "success": true,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "x"
+                        ],
+                        "type": "\u211d"
+                      },
+                      {
+                        "names": [
+                          "hx"
+                        ],
+                        "type": "2 \u2264 x"
+                      },
+                      {
+                        "names": [
+                          "integral_eq_loglog"
+                        ],
+                        "type": "\u222b (y : \u211d) in 2..x, 1 / y / Real.log y = Real.log (Real.log x) - Real.log (Real.log 2)"
+                      }
+                    ],
+                    "target": "Real.log (Real.log x) - Real.log (Real.log 2) + L (HDiv.hDiv 1) + x\u207b\u00b9 * (\u03b8 x - x) / Real.log x =\n  Real.log (Real.log x) + (-Real.log (Real.log 2) + L fun x \u21a6 x\u207b\u00b9) + (\u03b8 x - x) / (x * Real.log x)"
+                  }
+                ]
+              },
+              "localSeconds": 0.08335524890571833,
+              "importedSeconds": 0.05526308692060411
+            },
+            {
+              "candidate": "linarith",
+              "outcome": {
+                "success": false,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "x"
+                        ],
+                        "type": "\u211d"
+                      },
+                      {
+                        "names": [
+                          "hx"
+                        ],
+                        "type": "2 \u2264 x"
+                      },
+                      {
+                        "names": [
+                          "integral_eq_loglog"
+                        ],
+                        "type": "\u222b (y : \u211d) in 2..x, 1 / y / Real.log y = Real.log (Real.log x) - Real.log (Real.log 2)"
+                      }
+                    ],
+                    "target": "Real.log (Real.log x) - Real.log (Real.log 2) + L (HDiv.hDiv 1) + 1 / x * (\u03b8 x - x) / Real.log x +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y =\n  Real.log (Real.log x) + (-Real.log (Real.log 2) + L fun x \u21a6 1 / x) + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y"
+                  }
+                ]
+              },
+              "localSeconds": 0.029941002023406327,
+              "importedSeconds": 0.025393143063411117
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "theorem": "eq_419",
+      "solved": true,
+      "steps": [
+        {
+          "step": 0,
+          "snapshotBytes": 46701956,
+          "copySeconds": 7.776814481941983,
+          "comparisons": [
+            {
+              "candidate": "original",
+              "outcome": {
+                "success": true,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "x"
+                        ],
+                        "type": "\u211d"
+                      },
+                      {
+                        "names": [
+                          "hx"
+                        ],
+                        "type": "2 \u2264 x"
+                      }
+                    ],
+                    "target": "Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (a : \u211d) in Set.Ioi x, (\u03b8 a - a) * ((1 + Real.log a) / -(a ^ 2 * Real.log a ^ 2))"
+                  }
+                ]
+              },
+              "localSeconds": 0.03677850298117846,
+              "importedSeconds": 0.01892669510561973
+            },
+            {
+              "candidate": "simp",
+              "outcome": {
+                "success": true,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "x"
+                        ],
+                        "type": "\u211d"
+                      },
+                      {
+                        "names": [
+                          "hx"
+                        ],
+                        "type": "2 \u2264 x"
+                      }
+                    ],
+                    "target": "\u2211 x \u2264 \u230ax\u230b\u208a with Nat.Prime x, (\u2191x)\u207b\u00b9 =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) -\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * (1 + Real.log y) / (y ^ 2 * Real.log y ^ 2)"
+                  }
+                ]
+              },
+              "localSeconds": 0.02500729006715119,
+              "importedSeconds": 0.024275417905300856
+            },
+            {
+              "candidate": "linarith",
+              "outcome": {
+                "success": false,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "x"
+                        ],
+                        "type": "\u211d"
+                      },
+                      {
+                        "names": [
+                          "hx"
+                        ],
+                        "type": "2 \u2264 x"
+                      }
+                    ],
+                    "target": "\u2211 p \u2264 \u230ax\u230b\u208a with Nat.Prime p, 1 / \u2191p =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) -\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * (1 + Real.log y) / (y ^ 2 * Real.log y ^ 2)"
+                  }
+                ]
+              },
+              "localSeconds": 0.040117277996614575,
+              "importedSeconds": 0.03330509993247688
+            }
+          ]
+        },
+        {
+          "step": 1,
+          "snapshotBytes": 46799465,
+          "copySeconds": 7.734040737967007,
+          "comparisons": [
+            {
+              "candidate": "original",
+              "outcome": {
+                "success": true,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "x"
+                        ],
+                        "type": "\u211d"
+                      },
+                      {
+                        "names": [
+                          "hx"
+                        ],
+                        "type": "2 \u2264 x"
+                      },
+                      {
+                        "names": [
+                          "this"
+                        ],
+                        "type": "\u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y =\n  \u222b (a : \u211d) in Set.Ioi x, (\u03b8 a - a) * ((1 + Real.log a) / -(a ^ 2 * Real.log a ^ 2))"
+                      }
+                    ],
+                    "target": "Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (a : \u211d) in Set.Ioi x, (\u03b8 a - a) * ((1 + Real.log a) / -(a ^ 2 * Real.log a ^ 2))"
+                  }
+                ]
+              },
+              "localSeconds": 0.1871221159817651,
+              "importedSeconds": 0.18016363203059882
+            },
+            {
+              "candidate": "simp",
+              "outcome": {
+                "success": true,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "x"
+                        ],
+                        "type": "\u211d"
+                      },
+                      {
+                        "names": [
+                          "hx"
+                        ],
+                        "type": "2 \u2264 x"
+                      }
+                    ],
+                    "target": "\u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 s\u207b\u00b9 / Real.log s) y =\n  \u222b (a : \u211d) in Set.Ioi x, (\u03b8 a - a) * ((1 + Real.log a) / -(a ^ 2 * Real.log a ^ 2))"
+                  }
+                ]
+              },
+              "localSeconds": 0.03503804292995483,
+              "importedSeconds": 0.04938521306030452
+            },
+            {
+              "candidate": "linarith",
+              "outcome": {
+                "success": false,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "x"
+                        ],
+                        "type": "\u211d"
+                      },
+                      {
+                        "names": [
+                          "hx"
+                        ],
+                        "type": "2 \u2264 x"
+                      }
+                    ],
+                    "target": "Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y =\n  Real.log (Real.log x) + meisselMertensConstant + (\u03b8 x - x) / (x * Real.log x) +\n    \u222b (a : \u211d) in Set.Ioi x, (\u03b8 a - a) * ((1 + Real.log a) / -(a ^ 2 * Real.log a ^ 2))"
+                  }
+                ]
+              },
+              "localSeconds": 0.022214361932128668,
+              "importedSeconds": 0.04500486294273287
+            }
+          ]
+        },
+        {
+          "step": 2,
+          "snapshotBytes": 47061289,
+          "copySeconds": 8.018198525998741,
+          "comparisons": [
+            {
+              "candidate": "original",
+              "outcome": {
+                "success": true,
+                "goals": []
+              },
+              "localSeconds": 0.01984038797672838,
+              "importedSeconds": 0.009458856075070798
+            },
+            {
+              "candidate": "simp",
+              "outcome": {
+                "success": true,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "x"
+                        ],
+                        "type": "\u211d"
+                      },
+                      {
+                        "names": [
+                          "hx"
+                        ],
+                        "type": "2 \u2264 x"
+                      },
+                      {
+                        "names": [
+                          "this"
+                        ],
+                        "type": "\u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 1 / s / Real.log s) y =\n  \u222b (a : \u211d) in Set.Ioi x, (\u03b8 a - a) * ((1 + Real.log a) / -(a ^ 2 * Real.log a ^ 2))"
+                      }
+                    ],
+                    "target": "\u222b (y : \u211d) in Set.Ioi x, (\u03b8 y - y) * deriv (fun s \u21a6 s\u207b\u00b9 / Real.log s) y =\n  \u222b (a : \u211d) in Set.Ioi x, (\u03b8 a - a) * ((1 + Real.log a) / -(a ^ 2 * Real.log a ^ 2))"
+                  }
+                ]
+              },
+              "localSeconds": 0.038622191990725696,
+              "importedSeconds": 0.03826549695804715
+            },
+            {
+              "candidate": "linarith",
+              "outcome": {
+                "success": true,
+                "goals": []
+              },
+              "localSeconds": 0.05578004301059991,
+              "importedSeconds": 0.06898392201401293
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "theorem": "kadiri_laplace_neg_line_weight_bounded_of_continuous",
+      "solved": true,
+      "steps": [
+        {
+          "step": 0,
+          "snapshotBytes": 39045365,
+          "copySeconds": 6.782032210030593,
+          "comparisons": [
+            {
+              "candidate": "original",
+              "outcome": {
+                "success": true,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "\u03c8"
+                        ],
+                        "type": "\u211d \u2192 \u2102"
+                      },
+                      {
+                        "names": [
+                          "h\u03c8"
+                        ],
+                        "type": "Continuous \u03c8"
+                      },
+                      {
+                        "names": [
+                          "b",
+                          "sigma"
+                        ],
+                        "type": "\u211d"
+                      },
+                      {
+                        "names": [
+                          "hlo"
+                        ],
+                        "type": "-(1 + b) < sigma"
+                      },
+                      {
+                        "names": [
+                          "hhi"
+                        ],
+                        "type": "sigma < b"
+                      },
+                      {
+                        "names": [
+                          "h\u03c8_decay"
+                        ],
+                        "type": "(fun x \u21a6 \u03c8 x * cexp (\u2191x / 2)) =O[cocompact \u211d] fun x \u21a6 Real.exp (-(1 / 2 + b) * |x|)"
+                      },
+                      {
+                        "names": [
+                          "htop"
+                        ],
+                        "type": "(fun x \u21a6 cexp (-(\u2191sigma * \u2191x)) * \u03c8 x) =O[atTop] fun x \u21a6 Real.exp (-(1 + b + sigma) * x)"
+                      }
+                    ],
+                    "target": "\u2203 B, 0 \u2264 B \u2227 \u2200 (x : \u211d), \u2016cexp (-(\u2191sigma * \u2191x)) * \u03c8 x\u2016 \u2264 B"
+                  }
+                ]
+              },
+              "localSeconds": 0.012708442052826285,
+              "importedSeconds": 0.01155974599532783
+            },
+            {
+              "candidate": "simp",
+              "outcome": {
+                "success": true,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "\u03c8"
+                        ],
+                        "type": "\u211d \u2192 \u2102"
+                      },
+                      {
+                        "names": [
+                          "h\u03c8"
+                        ],
+                        "type": "Continuous \u03c8"
+                      },
+                      {
+                        "names": [
+                          "b",
+                          "sigma"
+                        ],
+                        "type": "\u211d"
+                      },
+                      {
+                        "names": [
+                          "hlo"
+                        ],
+                        "type": "-(1 + b) < sigma"
+                      },
+                      {
+                        "names": [
+                          "hhi"
+                        ],
+                        "type": "sigma < b"
+                      },
+                      {
+                        "names": [
+                          "h\u03c8_decay"
+                        ],
+                        "type": "(fun x \u21a6 \u03c8 x * cexp (\u2191x / 2)) =O[cocompact \u211d] fun x \u21a6 Real.exp (-(1 / 2 + b) * |x|)"
+                      }
+                    ],
+                    "target": "\u2203 B, 0 \u2264 B \u2227 \u2200 (x : \u211d), \u2016cexp (-(\u2191sigma * \u2191x))\u2016 * \u2016\u03c8 x\u2016 \u2264 B"
+                  }
+                ]
+              },
+              "localSeconds": 0.05472746700979769,
+              "importedSeconds": 0.054334323038347065
+            },
+            {
+              "candidate": "linarith",
+              "outcome": {
+                "success": false,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "\u03c8"
+                        ],
+                        "type": "\u211d \u2192 \u2102"
+                      },
+                      {
+                        "names": [
+                          "h\u03c8"
+                        ],
+                        "type": "Continuous \u03c8"
+                      },
+                      {
+                        "names": [
+                          "b",
+                          "sigma"
+                        ],
+                        "type": "\u211d"
+                      },
+                      {
+                        "names": [
+                          "hlo"
+                        ],
+                        "type": "-(1 + b) < sigma"
+                      },
+                      {
+                        "names": [
+                          "hhi"
+                        ],
+                        "type": "sigma < b"
+                      },
+                      {
+                        "names": [
+                          "h\u03c8_decay"
+                        ],
+                        "type": "(fun x \u21a6 \u03c8 x * cexp (\u2191x / 2)) =O[cocompact \u211d] fun x \u21a6 Real.exp (-(1 / 2 + b) * |x|)"
+                      }
+                    ],
+                    "target": "\u2203 B, 0 \u2264 B \u2227 \u2200 (x : \u211d), \u2016cexp (-(\u2191sigma * \u2191x)) * \u03c8 x\u2016 \u2264 B"
+                  }
+                ]
+              },
+              "localSeconds": 0.018856458947993815,
+              "importedSeconds": 0.018628230085596442
+            }
+          ]
+        },
+        {
+          "step": 1,
+          "snapshotBytes": 39097693,
+          "copySeconds": 6.655294960946776,
+          "comparisons": [
+            {
+              "candidate": "original",
+              "outcome": {
+                "success": true,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "\u03c8"
+                        ],
+                        "type": "\u211d \u2192 \u2102"
+                      },
+                      {
+                        "names": [
+                          "h\u03c8"
+                        ],
+                        "type": "Continuous \u03c8"
+                      },
+                      {
+                        "names": [
+                          "b",
+                          "sigma"
+                        ],
+                        "type": "\u211d"
+                      },
+                      {
+                        "names": [
+                          "hlo"
+                        ],
+                        "type": "-(1 + b) < sigma"
+                      },
+                      {
+                        "names": [
+                          "hhi"
+                        ],
+                        "type": "sigma < b"
+                      },
+                      {
+                        "names": [
+                          "h\u03c8_decay"
+                        ],
+                        "type": "(fun x \u21a6 \u03c8 x * cexp (\u2191x / 2)) =O[cocompact \u211d] fun x \u21a6 Real.exp (-(1 / 2 + b) * |x|)"
+                      },
+                      {
+                        "names": [
+                          "htop"
+                        ],
+                        "type": "(fun x \u21a6 cexp (-(\u2191sigma * \u2191x)) * \u03c8 x) =O[atTop] fun x \u21a6 Real.exp (-(1 + b + sigma) * x)"
+                      },
+                      {
+                        "names": [
+                          "hbot"
+                        ],
+                        "type": "(fun x \u21a6 cexp (-(\u2191sigma * \u2191x)) * \u03c8 x) =O[atBot] fun x \u21a6 Real.exp ((b - sigma) * x)"
+                      }
+                    ],
+                    "target": "\u2203 B, 0 \u2264 B \u2227 \u2200 (x : \u211d), \u2016cexp (-(\u2191sigma * \u2191x)) * \u03c8 x\u2016 \u2264 B"
+                  }
+                ]
+              },
+              "localSeconds": 0.012159086065366864,
+              "importedSeconds": 0.027597918990068138
+            },
+            {
+              "candidate": "simp",
+              "outcome": {
+                "success": true,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "\u03c8"
+                        ],
+                        "type": "\u211d \u2192 \u2102"
+                      },
+                      {
+                        "names": [
+                          "h\u03c8"
+                        ],
+                        "type": "Continuous \u03c8"
+                      },
+                      {
+                        "names": [
+                          "b",
+                          "sigma"
+                        ],
+                        "type": "\u211d"
+                      },
+                      {
+                        "names": [
+                          "hlo"
+                        ],
+                        "type": "-(1 + b) < sigma"
+                      },
+                      {
+                        "names": [
+                          "hhi"
+                        ],
+                        "type": "sigma < b"
+                      },
+                      {
+                        "names": [
+                          "h\u03c8_decay"
+                        ],
+                        "type": "(fun x \u21a6 \u03c8 x * cexp (\u2191x / 2)) =O[cocompact \u211d] fun x \u21a6 Real.exp (-(1 / 2 + b) * |x|)"
+                      },
+                      {
+                        "names": [
+                          "htop"
+                        ],
+                        "type": "(fun x \u21a6 cexp (-(\u2191sigma * \u2191x)) * \u03c8 x) =O[atTop] fun x \u21a6 Real.exp (-(1 + b + sigma) * x)"
+                      }
+                    ],
+                    "target": "\u2203 B, 0 \u2264 B \u2227 \u2200 (x : \u211d), \u2016cexp (-(\u2191sigma * \u2191x))\u2016 * \u2016\u03c8 x\u2016 \u2264 B"
+                  }
+                ]
+              },
+              "localSeconds": 0.026990722049959004,
+              "importedSeconds": 0.046933169942349195
+            },
+            {
+              "candidate": "linarith",
+              "outcome": {
+                "success": false,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "\u03c8"
+                        ],
+                        "type": "\u211d \u2192 \u2102"
+                      },
+                      {
+                        "names": [
+                          "h\u03c8"
+                        ],
+                        "type": "Continuous \u03c8"
+                      },
+                      {
+                        "names": [
+                          "b",
+                          "sigma"
+                        ],
+                        "type": "\u211d"
+                      },
+                      {
+                        "names": [
+                          "hlo"
+                        ],
+                        "type": "-(1 + b) < sigma"
+                      },
+                      {
+                        "names": [
+                          "hhi"
+                        ],
+                        "type": "sigma < b"
+                      },
+                      {
+                        "names": [
+                          "h\u03c8_decay"
+                        ],
+                        "type": "(fun x \u21a6 \u03c8 x * cexp (\u2191x / 2)) =O[cocompact \u211d] fun x \u21a6 Real.exp (-(1 / 2 + b) * |x|)"
+                      },
+                      {
+                        "names": [
+                          "htop"
+                        ],
+                        "type": "(fun x \u21a6 cexp (-(\u2191sigma * \u2191x)) * \u03c8 x) =O[atTop] fun x \u21a6 Real.exp (-(1 + b + sigma) * x)"
+                      }
+                    ],
+                    "target": "\u2203 B, 0 \u2264 B \u2227 \u2200 (x : \u211d), \u2016cexp (-(\u2191sigma * \u2191x)) * \u03c8 x\u2016 \u2264 B"
+                  }
+                ]
+              },
+              "localSeconds": 0.009720187052153051,
+              "importedSeconds": 0.020340471994131804
+            }
+          ]
+        },
+        {
+          "step": 2,
+          "snapshotBytes": 39106435,
+          "copySeconds": 8.454900730983354,
+          "comparisons": [
+            {
+              "candidate": "original",
+              "outcome": {
+                "success": true,
+                "goals": []
+              },
+              "localSeconds": 0.056193527998402715,
+              "importedSeconds": 0.0446720429463312
+            },
+            {
+              "candidate": "simp",
+              "outcome": {
+                "success": true,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "\u03c8"
+                        ],
+                        "type": "\u211d \u2192 \u2102"
+                      },
+                      {
+                        "names": [
+                          "h\u03c8"
+                        ],
+                        "type": "Continuous \u03c8"
+                      },
+                      {
+                        "names": [
+                          "b",
+                          "sigma"
+                        ],
+                        "type": "\u211d"
+                      },
+                      {
+                        "names": [
+                          "hlo"
+                        ],
+                        "type": "-(1 + b) < sigma"
+                      },
+                      {
+                        "names": [
+                          "hhi"
+                        ],
+                        "type": "sigma < b"
+                      },
+                      {
+                        "names": [
+                          "h\u03c8_decay"
+                        ],
+                        "type": "(fun x \u21a6 \u03c8 x * cexp (\u2191x / 2)) =O[cocompact \u211d] fun x \u21a6 Real.exp (-(1 / 2 + b) * |x|)"
+                      },
+                      {
+                        "names": [
+                          "htop"
+                        ],
+                        "type": "(fun x \u21a6 cexp (-(\u2191sigma * \u2191x)) * \u03c8 x) =O[atTop] fun x \u21a6 Real.exp (-(1 + b + sigma) * x)"
+                      },
+                      {
+                        "names": [
+                          "hbot"
+                        ],
+                        "type": "(fun x \u21a6 cexp (-(\u2191sigma * \u2191x)) * \u03c8 x) =O[atBot] fun x \u21a6 Real.exp ((b - sigma) * x)"
+                      }
+                    ],
+                    "target": "\u2203 B, 0 \u2264 B \u2227 \u2200 (x : \u211d), \u2016cexp (-(\u2191sigma * \u2191x))\u2016 * \u2016\u03c8 x\u2016 \u2264 B"
+                  }
+                ]
+              },
+              "localSeconds": 0.04730673599988222,
+              "importedSeconds": 0.04933028295636177
+            },
+            {
+              "candidate": "linarith",
+              "outcome": {
+                "success": false,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "\u03c8"
+                        ],
+                        "type": "\u211d \u2192 \u2102"
+                      },
+                      {
+                        "names": [
+                          "h\u03c8"
+                        ],
+                        "type": "Continuous \u03c8"
+                      },
+                      {
+                        "names": [
+                          "b",
+                          "sigma"
+                        ],
+                        "type": "\u211d"
+                      },
+                      {
+                        "names": [
+                          "hlo"
+                        ],
+                        "type": "-(1 + b) < sigma"
+                      },
+                      {
+                        "names": [
+                          "hhi"
+                        ],
+                        "type": "sigma < b"
+                      },
+                      {
+                        "names": [
+                          "h\u03c8_decay"
+                        ],
+                        "type": "(fun x \u21a6 \u03c8 x * cexp (\u2191x / 2)) =O[cocompact \u211d] fun x \u21a6 Real.exp (-(1 / 2 + b) * |x|)"
+                      },
+                      {
+                        "names": [
+                          "htop"
+                        ],
+                        "type": "(fun x \u21a6 cexp (-(\u2191sigma * \u2191x)) * \u03c8 x) =O[atTop] fun x \u21a6 Real.exp (-(1 + b + sigma) * x)"
+                      },
+                      {
+                        "names": [
+                          "hbot"
+                        ],
+                        "type": "(fun x \u21a6 cexp (-(\u2191sigma * \u2191x)) * \u03c8 x) =O[atBot] fun x \u21a6 Real.exp ((b - sigma) * x)"
+                      }
+                    ],
+                    "target": "\u2203 B, 0 \u2264 B \u2227 \u2200 (x : \u211d), \u2016cexp (-(\u2191sigma * \u2191x)) * \u03c8 x\u2016 \u2264 B"
+                  }
+                ]
+              },
+              "localSeconds": 0.026052778004668653,
+              "importedSeconds": 0.010347396950237453
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "theorem": "kadiri_laplace_neg_line_weight_deriv",
+      "solved": true,
+      "steps": [
+        {
+          "step": 0,
+          "snapshotBytes": 39077440,
+          "copySeconds": 7.19427410105709,
+          "comparisons": [
+            {
+              "candidate": "original",
+              "outcome": {
+                "success": true,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "\u03c6"
+                        ],
+                        "type": "\u211d \u2192 \u2102"
+                      },
+                      {
+                        "names": [
+                          "h\u03c6"
+                        ],
+                        "type": "ContDiff \u211d 1 \u03c6"
+                      },
+                      {
+                        "names": [
+                          "sigma",
+                          "y"
+                        ],
+                        "type": "\u211d"
+                      }
+                    ],
+                    "target": "deriv (fun y \u21a6 cexp (-(\u2191sigma * \u2191y))) y * \u03c6 y + cexp (-(\u2191sigma * \u2191y)) * deriv \u03c6 y =\n  -\u2191sigma * (cexp (-(\u2191sigma * \u2191y)) * \u03c6 y) + cexp (-(\u2191sigma * \u2191y)) * deriv \u03c6 y"
+                  }
+                ]
+              },
+              "localSeconds": 0.03613739600405097,
+              "importedSeconds": 0.03900609503034502
+            },
+            {
+              "candidate": "simp",
+              "outcome": {
+                "success": true,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "\u03c6"
+                        ],
+                        "type": "\u211d \u2192 \u2102"
+                      },
+                      {
+                        "names": [
+                          "h\u03c6"
+                        ],
+                        "type": "ContDiff \u211d 1 \u03c6"
+                      },
+                      {
+                        "names": [
+                          "sigma",
+                          "y"
+                        ],
+                        "type": "\u211d"
+                      }
+                    ],
+                    "target": "deriv (fun x \u21a6 cexp (-(\u2191sigma * \u2191x)) * \u03c6 x) y =\n  -(\u2191sigma * (cexp (-(\u2191sigma * \u2191y)) * \u03c6 y)) + cexp (-(\u2191sigma * \u2191y)) * deriv \u03c6 y"
+                  }
+                ]
+              },
+              "localSeconds": 0.04209145391359925,
+              "importedSeconds": 0.05228286294732243
+            },
+            {
+              "candidate": "linarith",
+              "outcome": {
+                "success": false,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "\u03c6"
+                        ],
+                        "type": "\u211d \u2192 \u2102"
+                      },
+                      {
+                        "names": [
+                          "h\u03c6"
+                        ],
+                        "type": "ContDiff \u211d 1 \u03c6"
+                      },
+                      {
+                        "names": [
+                          "sigma",
+                          "y"
+                        ],
+                        "type": "\u211d"
+                      }
+                    ],
+                    "target": "deriv (fun x \u21a6 cexp (-(\u2191sigma * \u2191x)) * \u03c6 x) y =\n  -\u2191sigma * (cexp (-(\u2191sigma * \u2191y)) * \u03c6 y) + cexp (-(\u2191sigma * \u2191y)) * deriv \u03c6 y"
+                  }
+                ]
+              },
+              "localSeconds": 0.005606947001069784,
+              "importedSeconds": 0.007944787037558854
+            }
+          ]
+        },
+        {
+          "step": 1,
+          "snapshotBytes": 39091791,
+          "copySeconds": 6.527870438061655,
+          "comparisons": [
+            {
+              "candidate": "original",
+              "outcome": {
+                "success": true,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "\u03c6"
+                        ],
+                        "type": "\u211d \u2192 \u2102"
+                      },
+                      {
+                        "names": [
+                          "h\u03c6"
+                        ],
+                        "type": "ContDiff \u211d 1 \u03c6"
+                      },
+                      {
+                        "names": [
+                          "sigma",
+                          "y"
+                        ],
+                        "type": "\u211d"
+                      }
+                    ],
+                    "target": "-\u2191sigma * cexp (-(\u2191sigma * \u2191y)) * \u03c6 y + cexp (-(\u2191sigma * \u2191y)) * deriv \u03c6 y =\n  -\u2191sigma * (cexp (-(\u2191sigma * \u2191y)) * \u03c6 y) + cexp (-(\u2191sigma * \u2191y)) * deriv \u03c6 y"
+                  }
+                ]
+              },
+              "localSeconds": 0.028124875971116126,
+              "importedSeconds": 0.029859103029593825
+            },
+            {
+              "candidate": "simp",
+              "outcome": {
+                "success": true,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "\u03c6"
+                        ],
+                        "type": "\u211d \u2192 \u2102"
+                      },
+                      {
+                        "names": [
+                          "h\u03c6"
+                        ],
+                        "type": "ContDiff \u211d 1 \u03c6"
+                      },
+                      {
+                        "names": [
+                          "sigma",
+                          "y"
+                        ],
+                        "type": "\u211d"
+                      }
+                    ],
+                    "target": "deriv (fun y \u21a6 cexp (-(\u2191sigma * \u2191y))) y * \u03c6 y = -(\u2191sigma * (cexp (-(\u2191sigma * \u2191y)) * \u03c6 y))"
+                  }
+                ]
+              },
+              "localSeconds": 0.029476118972525,
+              "importedSeconds": 0.05991052999161184
+            },
+            {
+              "candidate": "linarith",
+              "outcome": {
+                "success": false,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "\u03c6"
+                        ],
+                        "type": "\u211d \u2192 \u2102"
+                      },
+                      {
+                        "names": [
+                          "h\u03c6"
+                        ],
+                        "type": "ContDiff \u211d 1 \u03c6"
+                      },
+                      {
+                        "names": [
+                          "sigma",
+                          "y"
+                        ],
+                        "type": "\u211d"
+                      }
+                    ],
+                    "target": "deriv (fun y \u21a6 cexp (-(\u2191sigma * \u2191y))) y * \u03c6 y + cexp (-(\u2191sigma * \u2191y)) * deriv \u03c6 y =\n  -\u2191sigma * (cexp (-(\u2191sigma * \u2191y)) * \u03c6 y) + cexp (-(\u2191sigma * \u2191y)) * deriv \u03c6 y"
+                  }
+                ]
+              },
+              "localSeconds": 0.009879609104245901,
+              "importedSeconds": 0.009661060059443116
+            }
+          ]
+        },
+        {
+          "step": 2,
+          "snapshotBytes": 39092880,
+          "copySeconds": 8.073092891019769,
+          "comparisons": [
+            {
+              "candidate": "original",
+              "outcome": {
+                "success": true,
+                "goals": []
+              },
+              "localSeconds": 0.018642071983776987,
+              "importedSeconds": 0.01057062903419137
+            },
+            {
+              "candidate": "simp",
+              "outcome": {
+                "success": true,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "\u03c6"
+                        ],
+                        "type": "\u211d \u2192 \u2102"
+                      },
+                      {
+                        "names": [
+                          "h\u03c6"
+                        ],
+                        "type": "ContDiff \u211d 1 \u03c6"
+                      },
+                      {
+                        "names": [
+                          "sigma",
+                          "y"
+                        ],
+                        "type": "\u211d"
+                      }
+                    ],
+                    "target": "\u2191sigma * cexp (-(\u2191sigma * \u2191y)) * \u03c6 y = \u2191sigma * (cexp (-(\u2191sigma * \u2191y)) * \u03c6 y)"
+                  }
+                ]
+              },
+              "localSeconds": 0.017393726971931756,
+              "importedSeconds": 0.03325675101950765
+            },
+            {
+              "candidate": "linarith",
+              "outcome": {
+                "success": false,
+                "goals": [
+                  {
+                    "goalPrefix": "\u22a2 ",
+                    "hyps": [
+                      {
+                        "names": [
+                          "\u03c6"
+                        ],
+                        "type": "\u211d \u2192 \u2102"
+                      },
+                      {
+                        "names": [
+                          "h\u03c6"
+                        ],
+                        "type": "ContDiff \u211d 1 \u03c6"
+                      },
+                      {
+                        "names": [
+                          "sigma",
+                          "y"
+                        ],
+                        "type": "\u211d"
+                      }
+                    ],
+                    "target": "-\u2191sigma * cexp (-(\u2191sigma * \u2191y)) * \u03c6 y + cexp (-(\u2191sigma * \u2191y)) * deriv \u03c6 y =\n  -\u2191sigma * (cexp (-(\u2191sigma * \u2191y)) * \u03c6 y) + cexp (-(\u2191sigma * \u2191y)) * deriv \u03c6 y"
+                  }
+                ]
+              },
+              "localSeconds": 0.008638254017569125,
+              "importedSeconds": 0.005470718955621123
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "scheduled": [],
+  "runtime": "a6d7bb65b640e09a649a37e45b65e955c7475d72de930f3a7064579a3b83e9d1",
+  "openSeconds": 30.65335087303538,
+  "passed": true,
+  "scope": "Migration correctness only; timings are not a scheduling speedup comparison.",
+  "snapshotBytesMeaning": "Compressed wire bytes (recorded before the harness gained separate native/wire fields).",
+  "diagnosis": {
+    "pendingCancellationPromises": 4,
+    "initialNativeBytes": 220474028,
+    "preparation": "Check that reporting trees have finished, then settle their cancellation tokens, as in Lean incremental saves.",
+    "probeShipped": false
+  },
+  "correctnessSummary": {
+    "proofsSolved": 4,
+    "completedTransfers": 12,
+    "matchedCandidateComparisons": 36,
+    "allMappingsReleased": true
+  },
+  "measurementNote": "Measured with uncommitted changes on beamCommit; pluginSha256 and workerSourcesSha256 identify the tested implementation."
+}

@@ -9,12 +9,25 @@ import random
 import sys
 import time
 import unittest
+import zlib
 from unittest.mock import AsyncMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.beam_pool.scheduler import Pool, steal_count
 from scripts.beam_pool.lsp import Lsp
-from scripts.beam_pool.worker import Worker, digest_file
+from scripts.beam_pool.worker import Worker, decompress_snapshot, digest_file
+
+
+class CompressionTest(unittest.TestCase):
+    def test_bounded_complete_stream(self):
+        raw = b"proof snapshot" * 1000
+        packed = zlib.compress(raw, 1)
+        self.assertEqual(decompress_snapshot(packed, len(raw)), raw)
+        for body, size in ((packed, 1), (packed, len(raw) + 1),
+                           (packed[:-1], len(raw)), (packed + b"trailing", len(raw)),
+                           (packed + packed, len(raw))):
+            with self.subTest(size=size, length=len(body)), self.assertRaises(ValueError):
+                decompress_snapshot(body, size)
 
 
 class SplitTest(unittest.TestCase):
@@ -263,12 +276,15 @@ class WorkerBudgetTest(unittest.IsolatedAsyncioTestCase):
         worker.lsp = FakeLsp()
         worker.loaded_libraries = lambda context: []
         worker.documents = {path: (doc, digest_file(root / path)) for path, doc in zip(paths, docs)}
-        body = b"0123456789"
-        with self.assertRaisesRegex(ValueError, "memory budget"):
-            await worker.execute("import", {
-                "path": paths[0], "manifest": {"identity": {}, "dependencies": [], "libraries": [],
-                                                "sha256": hashlib.sha256(body).hexdigest()},
-            }, body)
+        for limit, size in ((100, 10), (150, 40)):
+            worker.memory_limit = limit
+            body = zlib.compress(b"x" * size)
+            with self.subTest(limit=limit), self.assertRaisesRegex(ValueError, "memory budget"):
+                await worker.execute("import", {
+                    "path": paths[0], "manifest": {"identity": {}, "dependencies": [], "libraries": [],
+                                                    "encoding": "zlib", "uncompressedBytes": size,
+                                                    "sha256": hashlib.sha256(body).hexdigest()},
+                }, body)
 
     async def test_full_handle_budget_still_allows_readonly_continuation(self):
         root = Path(__file__).resolve().parents[1]

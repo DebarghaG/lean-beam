@@ -148,7 +148,7 @@ async def transfer_checks(peers):
     await sender.call("release", {"path": SOURCE, "handle": returned["handle"]})
     context, _ = await receiver.call("open", {"path": SOURCE})
     assert context["residentBytes"] == 0, context["residentBytes"]
-    return len(data)
+    return manifest["uncompressedBytes"], len(data)
 
 
 async def workload(peers, *, stealing, jobs, steps):
@@ -202,7 +202,7 @@ async def main(args):
             raise AssertionError("stale generation accepted")
         except ConnectionError:
             assert stale.failed
-        size = await transfer_checks(cluster.peers)
+        size, wire_size = await transfer_checks(cluster.peers)
         await chain_checks(cluster.peers)
         results = []
         for trial in range(args.repeat):
@@ -220,6 +220,7 @@ async def main(args):
                    for enabled in (False, True)}
         status, _ = await cluster.peers[0].call("status")
         report = {"docker": args.docker, "workers": args.workers, "snapshotBytes": size,
+                  "wireBytes": wire_size,
                   "leanVersion": command("lean", "--version"), "runtime": status["runtime"],
                   "runs": results, "speedup": medians[False] / medians[True],
                   "pinnedMedianSeconds": medians[False], "stealingMedianSeconds": medians[True]}

@@ -100,6 +100,45 @@ class TransferTest(unittest.IsolatedAsyncioTestCase):
         await self.release(receiver, doc, handle)
         self.assertEqual(await self.resident(receiver, doc), 0)
 
+    async def test_cached_realization_reporting_survives_transfer(self):
+        receiver, doc, path, identity = await self.pair("SnapshotReporting.lean")
+        handle = await self.import_snapshot(receiver, doc, path, identity)
+        result = await receiver.call("$/lean/runWith", {
+            "textDocument": doc, "handle": handle,
+            "text": "all_goals\n  snapshot_cached_reporting\n  exact transferredFact",
+        })
+        self.assertTrue(result["success"], result)
+        self.assertEqual(result["proofState"]["goals"], [])
+        await self.release(receiver, doc, handle)
+        self.assertEqual(await self.resident(receiver, doc), 0)
+
+    async def test_export_rejects_unfinished_reporting_without_cancelling_it(self):
+        client = await Lsp.start(ROOT, ROOT / ".lake/build/lib/libbeam_Beam_LSP.so",
+                                 env={**os.environ, "BEAM_SNAPSHOT_RUNTIME": "0" * 64})
+        self.addAsyncCleanup(client.close)
+        source = ROOT / "tests/scenario/docs/SnapshotReporting.lean"
+        doc = await client.open(source)
+        line = source.read_text().splitlines().index("  sorry")
+        result = await client.call("$/lean/runAt", {
+            "textDocument": doc, "position": {"line": line, "character": 2},
+            "text": "snapshot_pending_reporting", "storeHandle": True,
+        })
+        self.assertTrue(result["success"], result)
+        with tempfile.TemporaryDirectory(prefix="beam-pending-export-") as directory:
+            path = Path(directory) / "pending.snapshot"
+            with self.assertRaisesRegex(RpcError, "requires completed"):
+                await client.call("$/lean/beam/exportSnapshot", {
+                    "textDocument": doc, "handle": result["handle"], "path": str(path),
+                }, timeout=5)
+            self.assertFalse(path.exists())
+        finished = await client.call("$/lean/runWith", {
+            "textDocument": doc, "handle": result["handle"],
+            "text": "all_goals\n  snapshot_finish_reporting\n  trivial",
+        })
+        self.assertTrue(finished["success"], finished)
+        self.assertEqual(finished["proofState"]["goals"], [])
+        await self.release(client, doc, result["handle"])
+
     async def test_identity_and_version_rejected_before_read(self):
         receiver, doc, path, identity = await self.pair()
         for field, value in (("format", 99), ("compiler", "wrong"),
