@@ -44,7 +44,8 @@ class Resources:
                    (line.split() for line in (group / 'cpu.stat').read_text().splitlines())}
             rows.append({'cpuSeconds': cpu['usage_usec'] / 1e6,
                          'throttledSeconds': cpu['throttled_usec'] / 1e6,
-                         'memoryBytes': int((group / 'memory.current').read_text())})
+                         'memoryBytes': int((group / 'memory.current').read_text()),
+                         'swapBytes': int((group / 'memory.swap.current').read_text())})
         return rows
 
 
@@ -72,6 +73,7 @@ async def trial(cluster, cases, configuration, prior, seed, repeats):
         resources = Resources(cluster)
         before = resources.read()
         peaks = [row['memoryBytes'] for row in before]
+        swap_peaks = [row['swapBytes'] for row in before]
         latencies, completions, chains = [], [], []
         driver_cpu = time.process_time()
         started = time.monotonic()
@@ -80,6 +82,7 @@ async def trial(cluster, cases, configuration, prior, seed, repeats):
             while True:
                 for index, row in enumerate(resources.read()):
                     peaks[index] = max(peaks[index], row['memoryBytes'])
+                    swap_peaks[index] = max(swap_peaks[index], row['swapBytes'])
                 await asyncio.sleep(0.5)
         observer = asyncio.create_task(observe())
 
@@ -137,6 +140,7 @@ async def trial(cluster, cases, configuration, prior, seed, repeats):
         after = resources.read()
         for index, row in enumerate(after):
             peaks[index] = max(peaks[index], row['memoryBytes'])
+            swap_peaks[index] = max(swap_peaks[index], row['swapBytes'])
         record.update(status='passed', seconds=elapsed, attempts=len(completions),
                       attemptsPerSecond=len(completions) / elapsed,
                       latencyP50Seconds=statistics.median(latencies),
@@ -147,6 +151,7 @@ async def trial(cluster, cases, configuration, prior, seed, repeats):
                       workerCpuSeconds=[b['cpuSeconds'] - a['cpuSeconds'] for a, b in zip(before, after)],
                       workerThrottledSeconds=[b['throttledSeconds'] - a['throttledSeconds'] for a, b in zip(before, after)],
                       workerPeakObservedMemoryBytes=peaks,
+                      workerPeakObservedSwapBytes=swap_peaks,
                       metrics={key: ([b - a for a, b in zip(metrics_before[key], value)]
                                      if isinstance(value, list) else value - metrics_before[key])
                                for key, value in pool.metrics.items()})
