@@ -41,9 +41,12 @@ def outcome(result):
 
 
 class Cluster:
-    def __init__(self, project, runtime, workers=2):
+    def __init__(self, project, runtime, workers=2, *, cpus=2, memory_gib=8,
+                 timeout=120, snapshot_mib=256, threads=4):
         self.project, self.runtime = project.resolve(), runtime.resolve()
         self.workers = workers
+        self.cpus, self.memory_gib = cpus, memory_gib
+        self.timeout, self.snapshot_mib, self.threads = timeout, snapshot_mib, threads
         self.names, self.peers = [], []
         self.token = secrets.token_hex(32)
 
@@ -57,11 +60,11 @@ class Cluster:
         for index in range(self.workers):
             variant = "a" if index % 2 == 0 else "b"
             name = "beam-corpus-" + uuid.uuid4().hex[:12]
-            args = ["docker", "run", "--rm", "-d", "--name", name,
+            args = ["docker", "run", "-d", "--name", name,
                     "--user", f"{os.getuid()}:{os.getgid()}",
-                    "--cpus", "2", "--memory", "8g", "--pids-limit", "256",
+                    "--cpus", str(self.cpus), "--memory", f"{self.memory_gib}g", "--pids-limit", "256",
                     "-p", "127.0.0.1::8765", "-e", "BEAM_POOL_TOKEN",
-                    "-e", "LEAN_NUM_THREADS=4",
+                    "-e", f"LEAN_NUM_THREADS={self.threads}",
                     "-e", "PATH=/opt/lean/bin:/usr/local/bin:/usr/bin:/bin"]
             for key in ("LEAN_PATH", "LEAN_SRC_PATH", "LD_LIBRARY_PATH"):
                 value = mapped(environment.get(key, ""))
@@ -73,12 +76,14 @@ class Cluster:
                 args += ["--mount", f"type=bind,src={source},dst={target},readonly"]
             args += [f"beam-snapshot-worker:{variant}", "--project", "/project",
                      "--plugin", "/opt/beam/lib/libbeam_Beam_LSP.so",
-                     "--host", "0.0.0.0", "--port", "8765", "--timeout", "120"]
+                     "--host", "0.0.0.0", "--port", "8765", "--timeout", str(self.timeout),
+                     "--memory-mib", str(self.snapshot_mib)]
             command(*args, env={**os.environ, "BEAM_POOL_TOKEN": self.token})
             self.names.append(name)
             ports = json.loads(command("docker", "inspect", "--format",
                                        "{{json .NetworkSettings.Ports}}", name))
-            self.peers.append(Peer("127.0.0.1", int(ports["8765/tcp"][0]["HostPort"]), self.token))
+            self.peers.append(Peer("127.0.0.1", int(ports["8765/tcp"][0]["HostPort"]), self.token,
+                                   timeout=self.timeout + 60))
         for peer in self.peers:
             deadline = time.monotonic() + 120
             while True:
@@ -97,6 +102,7 @@ class Cluster:
             (output / f"worker-{index}.log").write_text(logs.stdout + logs.stderr)
             subprocess.run(["docker", "stop", "--time", "5", name],
                            stdout=subprocess.DEVNULL, check=False)
+            subprocess.run(["docker", "rm", name], stdout=subprocess.DEVNULL, check=False)
 
 
 async def call(peer, operation, task, **params):

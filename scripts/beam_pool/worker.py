@@ -122,7 +122,7 @@ class Worker:
                 raise ValueError("worker document budget exhausted by retained handles")
             old_doc, _ = self.documents.pop(victim)
             await self.lsp.notify("textDocument/didClose", {"textDocument": old_doc})
-        doc = await self.lsp.open(path)
+        doc = await self.lsp.open(path, timeout=self.request_timeout)
         self.documents[relative] = doc, source_hash
         return doc
 
@@ -213,14 +213,14 @@ class Worker:
                     })
                 size = path.stat().st_size
                 if size > self.memory_limit:
-                    raise ValueError("snapshot exceeds worker snapshot memory budget")
+                    raise ValueError(f"snapshot size {size} exceeds worker snapshot memory budget {self.memory_limit}")
                 with timed(stages, "read"):
                     raw = path.read_bytes()
                 with timed(stages, "compress"):
                     data = await asyncio.to_thread(zlib.compress, raw, 1)
                 del raw
                 if len(data) > MAX_BODY:
-                    raise ValueError("compressed snapshot exceeds transfer limit")
+                    raise ValueError(f"compressed snapshot size {len(data)} exceeds transfer limit {MAX_BODY}")
                 with timed(stages, "dependencies"):
                     dependencies = self.dependency_hashes(context["regions"])
                 with timed(stages, "libraries"):

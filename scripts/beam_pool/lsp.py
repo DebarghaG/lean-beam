@@ -119,13 +119,14 @@ class Lsp:
         finally:
             self.pending.pop(request_id, None)
 
-    async def open(self, path: Path):
+    async def open(self, path: Path, *, timeout=120):
         document = {"uri": path.as_uri(), "version": 1}
         await self.notify("textDocument/didOpen", {"dependencyBuildMode": "never", "textDocument": {
             **document, "languageId": "lean4", "text": path.read_text(),
         }})
         try:
-            ready = await self.call("$/beam/waitForDiagnostics", {"uri": document["uri"], "version": 1})
+            ready = await self.call("$/beam/waitForDiagnostics", {"uri": document["uri"], "version": 1},
+                                    timeout=timeout)
             if ready["hasFatalSnapshot"]:
                 diagnostics = ready["saveReadiness"]["currentDiagnostics"]
                 raise RuntimeError("Lean document setup failed: " +
