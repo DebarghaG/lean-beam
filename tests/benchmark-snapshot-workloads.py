@@ -185,6 +185,7 @@ async def main(args):
             excluded.append({'theorem': row['theorem'], 'baseline': row['baseline']['status'],
                              'migration': row['migration']['status']})
     assert len(cases) >= 2, 'Distinct-state scaling requires at least two qualified proofs'
+    assert len(cases) * args.repeats <= 4096, 'Mixed batch exceeds the default pool queue budget'
     assert all(len(step['candidates']) == 3 for case in cases for step in case['steps'])
     assert qualified['sources'] == {name: corpus.digest(args.project / name) for name in qualified['sources']}
     transfers = [transfer for case in cases for transfer in case['transfers']]
@@ -200,6 +201,7 @@ async def main(args):
               'images': [corpus.command('docker', 'image', 'inspect', '--format', '{{.Id}}',
                                        f'beam-snapshot-worker:{variant}') for variant in ['a', 'b']],
               'configuration': {'workers': args.workers, 'trials': args.trials, 'seed': args.seed,
+                                'workloads': args.workloads,
                                 'mixedAttemptsPerRoot': args.repeats, 'cpusPerWorker': args.cpus,
                                 'workerCpuSets': args.cpu_sets, 'driverCpuSet': sorted(os.sched_getaffinity(0)),
                                 'memoryGiBPerWorker': args.memory_gib, 'snapshotMiB': args.snapshot_mib,
@@ -248,7 +250,7 @@ async def main(args):
             for repetition in range(args.trials):
                 configurations = [{'workers': workers, 'trial': repetition, 'placement': placement,
                                    'workload': workload, 'mode': mode}
-                                  for placement in placements for workload in ['mixed', 'tree']
+                                  for placement in placements for workload in args.workloads
                                   for mode in ['pinned', 'stealing']]
                 random.Random(args.seed + repetition).shuffle(configurations)
                 for configuration in configurations:
@@ -282,6 +284,7 @@ if __name__ == '__main__':
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--workers', nargs='+', type=int, default=[1, 2, 4, 8])
     parser.add_argument('--trials', type=int, default=3)
+    parser.add_argument('--workloads', nargs='+', choices=['mixed', 'tree'], default=['mixed', 'tree'])
     parser.add_argument('--repeats', type=int, default=72)
     parser.add_argument('--seed', type=int, default=41)
     parser.add_argument('--cpus', type=int, default=2)

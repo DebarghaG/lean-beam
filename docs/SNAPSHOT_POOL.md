@@ -397,3 +397,46 @@ PFR uses Lean 4.35.0-rc2; PNT uses Lean 4.33.1. These limited runs support retai
 capability for sufficiently wide continuation queues. Agent evaluation should also measure the
 simpler case of independent `runAt` command batches, whose parallel execution needs no snapshot
 transfer, before attributing an agent-level improvement to migration.
+
+### Full saved-corpus runners
+
+`tests/qualify-snapshot-corpus.py` visits every saved proof for the selected project, without a
+proof-length filter. It first replays each chain locally, checking the original step, `simp`, and
+`linarith` from each parent. A separate replay of each passing chain moves the continuing state at
+the first, middle, and last step, then compares every candidate with the local reference. The
+report records rejected fragments, export/import errors, unvisited suffixes, resource observations,
+source hashes, and cleanup outcomes. Each source file gets a fresh pair of workers. A file that
+cannot be prepared is recorded once; dependent proofs remain explicitly unrun.
+
+```bash
+python3 tests/qualify-snapshot-corpus.py \
+  --corpus /path/to/saved-tasks.json \
+  --project /path/to/prepared/project --runtime /path/to/matching/beam-runtime \
+  --output /tmp/beam-qualification
+
+python3 tests/benchmark-snapshot-workloads.py \
+  --corpus /path/to/saved-tasks.json --qualification /tmp/beam-qualification/report.json \
+  --project /path/to/prepared/project --runtime /path/to/matching/beam-runtime \
+  --output /tmp/beam-workloads --workers 1 2 4 8 --trials 3
+```
+
+The second runner includes every proof that passed both qualification phases, and lists the
+excluded cases. It checks implementation and input hashes before using the reference outcomes.
+The mixed workload interleaves 72 candidates per distinct root in seeded shuffled rounds, cycling
+through the original first step, `simp`, and `linarith`. The tree workload advances all saved proof
+chains concurrently, checking those three siblings at each depth. `--workloads mixed --repeats 384`
+selects a wider interleaved workload; admission must fit the default 4,096-job queue budget.
+
+Concurrent root admission uses the ordinary least-loaded routing policy. Sequential admission
+concentrates roots on one worker, providing an explicit affinity-skew control. Actual root placement
+is recorded. Both placements compare pinned and stealing modes in shuffled order. Every trial has
+fresh handles, coordinator state, and an empty export cache. Warm document preparation is shared
+between paired trials and reported separately. These are replay workloads, not LLM search traces.
+
+Initial transfer estimates use the largest observed copy and export times in qualification;
+candidate estimates use local qualification service times. They are measurements under the
+qualification resource limits, not guarantees under the scaling allocation. The runner records
+wall time, candidate and chain completion, latency, CPU use and throttling, sampled memory,
+transfer counts and bytes, failures, and cleanup. Optional `--cpu-sets` fixes each worker's Docker
+CPU affinity; the report also records the driver's affinity. Worker counts that cannot prepare
+their documents within the host memory reserve are reported as preparation failures.
