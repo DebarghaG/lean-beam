@@ -226,12 +226,9 @@ async def main(args):
             await cluster.start()
             setup['startupSeconds'] = time.monotonic() - started
             meter = Resources(cluster)
-            prepared_bytes = None
-            for index, peer in enumerate(cluster.peers):
-                if prepared_bytes is not None:
-                    additional = max(0, prepared_bytes - meter.read()[index]['memoryBytes'])
-                    if qualification.memory_available() < args.reserve_gib * 1024**3 + additional:
-                        raise RuntimeError('Observed worker footprint would breach host memory reserve')
+
+            async def prepare(index):
+                peer = cluster.peers[index]
                 for filename in sorted({c['task']['file'] for c in cases}):
                     if qualification.memory_available() < args.reserve_gib * 1024**3:
                         raise RuntimeError('Host memory reserve reached while preparing workers')
@@ -242,7 +239,31 @@ async def main(args):
                     checkpoint()
                     if qualification.memory_available() < args.reserve_gib * 1024**3:
                         raise RuntimeError('Host memory reserve reached after document preparation')
-                prepared_bytes = max(prepared_bytes or 0, meter.read()[index]['memoryBytes'])
+            # Profile one complete worker, then admit concurrent preparation only
+            # when its measured peak footprint fits for every member of the batch.
+            await prepare(0)
+            prepared_bytes = int((meter.groups[0] / 'memory.peak').read_text())
+            pending = list(range(1, workers))
+            setup['preparationBatches'] = [[0]]
+            while pending:
+                available = qualification.memory_available() - args.reserve_gib * 1024**3
+                current, batch = meter.read(), []
+                for index in pending:
+                    additional = max(0, prepared_bytes - current[index]['memoryBytes'])
+                    if additional > available:
+                        break
+                    available -= additional
+                    batch.append(index)
+                if not batch:
+                    raise RuntimeError('Observed worker footprint would breach host memory reserve')
+                setup['preparationBatches'].append(batch)
+                outcomes = await asyncio.gather(*(prepare(index) for index in batch), return_exceptions=True)
+                for outcome in outcomes:
+                    if isinstance(outcome, BaseException):
+                        raise outcome
+                prepared_bytes = max(prepared_bytes, *(int((meter.groups[i] / 'memory.peak').read_text())
+                                                       for i in batch))
+                del pending[:len(batch)]
             setup.update(status='passed', seconds=time.monotonic() - started,
                          resources=qualification.resources(cluster))
             checkpoint()
