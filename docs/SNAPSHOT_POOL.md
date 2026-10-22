@@ -5,6 +5,12 @@ upstream Lean Beam implementation, using the existing `runAt`, `runWith`, and ha
 semantics. The coordinator is a small Python library; workers communicate over TCP and call Beam's
 LSP plugin. The installed CLI and MCP interfaces continue to use the local broker.
 
+The worker and coordinator here are a new experimental implementation on upstream Beam, rather
+than an extension of the earlier broker-integrated pool. Independent `runAt` requests can already
+be assigned to any prepared worker, with or without snapshot stealing. Migration addresses a
+different constraint: `runWith` continuations depend on a retained state that initially exists on
+one worker. Full integration with the earlier pool's agent-facing routing is not implemented.
+
 A limited `beam-bench` replay now passes both locally and after snapshot migration. Real corpus
 snapshots are much larger and slower to copy than the synthetic fixtures; see the
 [corpus evaluation](#corpus-evaluation) below.
@@ -91,7 +97,7 @@ artifacts there; no shared snapshot directory is required. On separate hosts, us
 authenticated private tunnel. The default listener is loopback. The bearer capability is supplied
 through `BEAM_POOL_TOKEN`, not a command-line argument.
 
-Greenbeam can keep one coordinator in its search process and replace pinned continuation calls with
+A LeanBeam client can keep one coordinator in its search process and replace pinned continuation calls with
 this interface:
 
 ```python
@@ -183,7 +189,7 @@ concurrent copies, and `stolenJobs` counts moves, including jobs moved more than
 uses an idle-worker round trip.
 
 These are correctness checks and a synthetic scheduling experiment. They do not rerun the original
-Greenbeam corpus, establish cross-machine WAN performance, or provide an MLSys evaluation. Real
+LeanBeam corpus, establish cross-machine WAN performance, or provide an MLSys evaluation. Real
 search traces, larger imported environments, skewed task durations, and heterogeneous workers need
 separate measurements before making those claims.
 
@@ -327,3 +333,67 @@ length. Use `--copy-seconds C --source-stall-seconds S` to exercise the existing
 A supplied `--transfer-profile` overrides both values with its measured medians. These options
 permit sensitivity tests across projects, tactic mixes, and queue sizes without changing the
 scheduling algorithm or requiring a particular agent trace.
+
+The [PFR report](benchmarks/snapshot-tactics-pfr-2026-10-21.json) and
+[PNT report](benchmarks/snapshot-tactics-pnt-2026-10-21.json) use that bounded automation set plus
+the original tactic: nine candidates at each state. Both projects use the same conservative initial
+estimates, `C = 8 s` and `S = 7 s`, without changing the pool defaults or the scheduling algorithm.
+Each project has six balanced trials at 9, 72, and 576 evaluations, comparing one worker, two
+workers with pinned affinity, and two workers with stealing. Each worker has two CPUs and 8 GiB;
+the workers run on the same host. The 72- and 576-job batches repeat the nine candidates to measure
+throughput. They are not recorded agent workloads.
+
+| Project | Evaluations | Pinned median | Stealing median | Paired geometric speedup | Trials with migration |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| PFR | 9 | 0.306 s | 0.268 s | 1.108× | 0/6 |
+| PFR | 72 | 2.202 s | 2.226 s | 1.001× | 0/6 |
+| PFR | 576 | 18.073 s | 13.323 s | 1.245× | 4/6 |
+| PNT | 9 | 0.677 s | 0.687 s | 0.998× | 0/6 |
+| PNT | 72 | 5.348 s | 5.424 s | 0.994× | 0/6 |
+| PNT | 576 | 43.651 s | 28.703 s | 1.506× | 6/6 |
+
+All four small/intermediate cases have paired-bootstrap intervals containing 1; none establishes
+a speedup. They do establish that these settings avoid the expensive copies seen with optimistic
+priors. The wide PNT case improves in every trial, with a descriptive 95% paired-bootstrap interval
+of 1.492–1.522×. The wide PFR policy comparison has an interval of 1.123–1.362×, but only four
+trials migrate. Its conservative estimates sometimes leave a profitable queue local; the aggregate
+policy gain must not be described as six successful migration speedups. The earlier requirement
+for attributing a result to migration in every trial remains unmet for PFR.
+
+The migration phase solves each selected three-step proof after three transfers. All 54
+local/imported candidate comparisons across the two projects agree, and all imported mappings are
+released. Stage medians over the three transfers in each project are:
+
+| Measurement | PFR | PNT |
+| --- | ---: | ---: |
+| Uncompressed snapshot | 144.2 MB | 221.1 MB |
+| Compressed snapshot | 29.7 MB | 46.8 MB |
+| Completed-reporting preparation | 0.011 s | 0.031 s |
+| Native save and compactor cleanup | 3.109 s | 5.814 s |
+| Compression | 0.506 s | 0.791 s |
+| Native import request | 0.059 s | 0.087 s |
+| Complete copy | 4.498 s | 8.156 s |
+
+Most copy time is in native save, while preparation is measured in milliseconds. This does not
+justify weakening completed-reporting checks or replacing Lean's serializer. The measurements
+identify where a future optimization would need to help; they do not demonstrate such an
+optimization. Worker document opening took 7.909 s for PFR and 25.643 s for PNT, separately from
+the warm batch timings. Large source-file elaboration costs alone do not imply expensive warm
+tactic evaluations, because Beam already reuses the elaborated context.
+
+To reproduce either project, select its prepared runtime and project directory:
+
+```bash
+python3 tests/benchmark-snapshot-corpus.py \
+  --corpus /path/to/beam-bench/work/tasks.json \
+  --project /path/to/prepared/project --runtime /path/to/matching/beam-runtime \
+  --output /tmp/beam-tactic-sweep \
+  --phases migration scaling --limit 1 --repeat 6 --batch-jobs 9 72 576 \
+  --tactics docs/benchmarks/snapshot-tactics-bounded.json \
+  --copy-seconds 8 --source-stall-seconds 7
+```
+
+PFR uses Lean 4.35.0-rc2; PNT uses Lean 4.33.1. These limited runs support retaining the migration
+capability for sufficiently wide continuation queues. Agent evaluation should also measure the
+simpler case of independent `runAt` command batches, whose parallel execution needs no snapshot
+transfer, before attributing an agent-level improvement to migration.
