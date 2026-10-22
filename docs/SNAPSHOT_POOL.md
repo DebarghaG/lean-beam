@@ -11,9 +11,31 @@ be assigned to any prepared worker, with or without snapshot stealing. Migration
 different constraint: `runWith` continuations depend on a retained state that initially exists on
 one worker. Full integration with the earlier pool's agent-facing routing is not implemented.
 
-A limited `beam-bench` replay now passes both locally and after snapshot migration. Real corpus
-snapshots are much larger and slower to copy than the synthetic fixtures; see the
+Real corpus snapshots are much larger and slower to copy than the synthetic fixtures. Broader
+qualification also found export timeouts and metadata payloads exceeding the transport limit.
+Migration currently works for a validated subset of the saved corpus; see the
 [corpus evaluation](#corpus-evaluation) below.
+
+## Evaluation status: stopped on 2026-10-21
+
+Implementation and evaluation notes are preserved on `feat/snapshot-work-stealing`. This work has
+not been merged into `main`. The experiment runners, queued follow-up jobs, and campaign worker
+containers were shut down. Resumption requires an explicit decision; no campaign launcher remains
+running.
+
+The five main scaling sweeps finished for PFR, Carleson, PrimeNumberTheoremAnd, FLT, and
+NavierStokesAndEuler. The wider PNT sweep was interrupted and is incomplete. Supplemental
+whole-proof Carleson scaling and the direct Long Gaps diagnostic had been queued but never started.
+Final consolidated reporting and verification were not completed. Saved reports and logs remain in
+`beam-bench/work/runs/snapshot-full-corpus-2026-10-21`; partial artifacts must not be treated as
+completed experiments.
+
+The main scaling sweeps observed no snapshot migrations during their timed phases. Their throughput
+gains demonstrate parallel execution of initially distributed roots, not a measured benefit from
+snapshot work stealing. Qualification separately established successful transfers for a subset of
+the corpus. The export stalls, metadata limits, and queue admission limitations described below
+remain unresolved. Per-parent queue grouping is an unimplemented proposal supported only by an
+offline admission calculation.
 
 ## State transfer
 
@@ -431,7 +453,17 @@ Concurrent root admission uses the ordinary least-loaded routing policy. Sequent
 concentrates roots on one worker, providing an explicit affinity-skew control. Actual root placement
 is recorded. Both placements compare pinned and stealing modes in shuffled order. Every trial has
 fresh handles, coordinator state, and an empty export cache. Warm document preparation is shared
-between paired trials and reported separately. These are replay workloads, not LLM search traces.
+between paired trials and reported separately. Preparation first profiles one worker, then admits
+concurrent batches against the host memory reserve; its elapsed time is not a production cold-start
+benchmark. These are replay workloads, not LLM search traces.
+
+Distributed placement represents concurrently submitted independent roots, as in several theorem
+searches or a batch of independent agent probes. It does not represent automatically spreading the
+branches of one retained proof state. Sequential calls choose worker zero when all loads tie, which
+is how the concentrated control obtains its initial placement. A single agent that waits for each
+result may expose much less parallel work than either queued mixed workload. Root admission is
+recorded separately and is outside the timed candidate phase. Neither placement establishes an
+end-to-end agent speedup; that requires preserving actual tool-call dependencies and arrival batches.
 
 Initial transfer estimates use the largest observed copy and export times in qualification;
 candidate estimates use local qualification service times. They are measurements under the
@@ -440,3 +472,95 @@ wall time, candidate and chain completion, latency, CPU use and throttling, samp
 transfer counts and bytes, failures, and cleanup. Optional `--cpu-sets` fixes each worker's Docker
 CPU affinity; the report also records the driver's affinity. Worker counts that cannot prepare
 their documents within the host memory reserve are reported as preparation failures.
+
+### Saved-corpus qualification results
+
+The broader campaign selected all 48 saved proofs: 251 step fragments in 22 source files across
+seven projects. An audit of the 39 existing task manifests under `beam-bench/work`, including
+ignored files, found the same 48 distinct proof keys and no additional saved proofs. This covers
+the saved tasks, not every theorem in the project checkouts. The input is the unchanged concatenation
+of `work/tasks.json` (29 proofs), `work/runs/openai-corpus/tasks.json` (16), and
+`work/runs/primegaps186/tasks.json` (3) from that repository. The original stepwise results were:
+
+| Project | Saved proofs | Local chains passed | Migrated chains passed | Other outcomes |
+| --- | ---: | ---: | ---: | --- |
+| PFR | 6 | 6 | 5 | One export timeout |
+| Carleson | 7 | 4 | 4 | Three saved fragments rejected locally |
+| PrimeNumberTheoremAnd | 8 | 8 | 8 | All passed |
+| FLT | 8 | 8 | 8 | All passed |
+| NavierStokesAndEuler | 10 | 10 | 9 | One export timeout |
+| LongGapsBetweenPrimes | 6 | 0 | 0 | Document metadata exceeded the header limit before proof replay |
+| PrimeGaps186 | 3 | 0 | 0 | Preparation stopped after proving that the source alone exceeded the header limit |
+
+The three Carleson rejections were checked separately using each entire, unchanged proof body
+grouped with parentheses. All three then passed locally and after migration. Two saved sequences
+had separated `classical` from the tactics it scopes; another supplied a bare semicolon sequence
+where the request expected one tactic. These were fragment-boundary problems. Their original
+failures remain recorded, and their whole-proof checks form a separate cohort.
+
+Together, the two qualification passes migrated **37 distinct proofs**, completed **105 transfers**,
+and obtained **483 matching local/imported candidate outcomes**, with no observed mismatch. Nine
+proofs could not enter the transport-based replay, and two locally passing chains timed out during
+export. Those exclusions prevent a claim that the full corpus supports migration.
+
+PFR's `condRuzsaDist_le'` export timed out after a 600-second request limit. A separate local
+reproduction under GDB stopped in `lean::task_manager::wait_for`, called by `lean_task_get` inside
+the object compactor. This confirms a task wait during native serialization, before compression
+or network transfer. The originating semantic field is not yet identified. Subsequent projects
+used explicit 120-second export/import deadlines; Navier–Stokes' `perturbed_exponential_decay_summable`
+also timed out at export. The scheduler and native serializer were unchanged throughout.
+
+Long Gaps' metadata response was **4,480,869 bytes**, above the **4,194,304-byte** JSON-header limit.
+Its 52,490 dependency hashes alone occupied 3,516,831 bytes. PrimeGaps' source-only identity already
+required at least 11,695,676 header bytes. Its still-unready preparation was therefore stopped after
+about 834 seconds of process elapsed time, with observed container memory peaking at 39.59 GiB.
+This is a proven protocol-size obstruction and a preparation lower bound, not a measured complete
+elaboration or an observed tactic failure.
+
+The 20,755-line Euler file did reach readiness: source preparation took about 124 seconds, while
+the two local proof chains, including their sibling attempts, took less than two seconds together.
+One chain migrated with snapshots around 213–214 MiB and copies around 9–10 seconds after receiver
+preparation. This separates three costs that must not be conflated: preparing the document,
+executing warm tactics, and transferring a retained state. The current worker prepares the
+receiver's document before importing a snapshot. These warm comparisons therefore do not establish
+that migration avoids cold file elaboration.
+
+### Transfer costs across the saved corpus
+
+These medians include successful qualification transfers only; the two timed-out exports remain
+separate failures. Receiver documents were already prepared. Native save includes compaction and
+compactor cleanup; the reporting-preparation column measures completed-task preparation inside
+export, not document elaboration.
+
+| Cohort | Transfers | Snapshot (MiB) | Reporting preparation | Native save | Compression | Complete copy |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| PFR | 15 | 137.5 | 0.011 s | 3.030 s | 0.496 s | 4.429 s |
+| Carleson steps | 12 | 137.2 | 0.056 s | 3.082 s | 0.502 s | 4.576 s |
+| PNT | 24 | 203.0 | 0.024 s | 5.326 s | 0.758 s | 7.479 s |
+| FLT | 24 | 122.3 | 0.005 s | 2.865 s | 0.436 s | 4.211 s |
+| Navier–Stokes/Euler | 27 | 167.5 | 0.006 s | 3.587 s | 0.595 s | 5.291 s |
+| Carleson whole proofs | 3 | 139.0 | 0.029 s | 3.602 s | 0.518 s | 5.300 s |
+
+Native save remains the largest component of successful transfers across these cohorts. The pending
+task stall needs a correctness/lifecycle diagnosis before serialization optimization; compression
+tuning alone cannot resolve it.
+
+### Queue admission diagnosis
+
+The existing split rule requires moved work `x > S + margin` for a cold export: otherwise the donor
+term `W + S - x` cannot beat leaving the queue alone. Increasing total backlog `W` does not remove
+this requirement. The current scheduler considers only the contiguous suffix sharing the last
+job's parent, even when many earlier jobs use that same parent.
+
+An offline reconstruction of the concentrated mixed queues, using their exact seeds and measured
+qualification estimates, found tail batches worth only 3–69 milliseconds in the main cohorts,
+against source-stall estimates of 4.6–8.5 seconds. The wider PNT control has 3,072 jobs, but its three
+initial tail batches still contain only 4–30 milliseconds of estimated work. None can pass the
+cold-copy admission rule. This is a queue-shape limitation as well as a transfer-cost limitation.
+
+Grouping all queued siblings of a parent changes that admission calculation. Under the same
+estimates, four of the eight wide PNT parents and two of the three whole-proof Carleson parents
+admit a profitable first split. This is an offline counterfactual, not a measured speedup or an
+implemented scheduler. It motivates evaluating per-parent queues while retaining the existing
+cost-aware split and ownership rules. Small PFR, Carleson-step, FLT, and Navier–Stokes queues still
+do not justify a cold copy under those estimates, even after grouping.
