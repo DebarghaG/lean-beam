@@ -201,6 +201,7 @@ async def main(args):
                                        f'beam-snapshot-worker:{variant}') for variant in ['a', 'b']],
               'configuration': {'workers': args.workers, 'trials': args.trials, 'seed': args.seed,
                                 'mixedAttemptsPerRoot': args.repeats, 'cpusPerWorker': args.cpus,
+                                'workerCpuSets': args.cpu_sets, 'driverCpuSet': sorted(os.sched_getaffinity(0)),
                                 'memoryGiBPerWorker': args.memory_gib, 'snapshotMiB': args.snapshot_mib,
                                 'priors': prior, 'serviceEstimates': 'Untimed local qualification service times'},
               'cases': [{'theorem': c['task']['theorem'], 'file': c['task']['file'],
@@ -214,7 +215,8 @@ async def main(args):
     for workers in args.workers:
         cluster = corpus.Cluster(args.project, args.runtime, workers, cpus=args.cpus,
                                  memory_gib=args.memory_gib, snapshot_mib=args.snapshot_mib,
-                                 timeout=args.timeout, threads=2)
+                                 timeout=args.timeout, threads=2,
+                                 cpu_sets=args.cpu_sets[:workers] if args.cpu_sets else None)
         setup = {'workers': workers, 'status': 'running', 'opened': []}
         report['preparation'].append(setup)
         started = time.monotonic()
@@ -283,6 +285,7 @@ if __name__ == '__main__':
     parser.add_argument('--repeats', type=int, default=72)
     parser.add_argument('--seed', type=int, default=41)
     parser.add_argument('--cpus', type=int, default=2)
+    parser.add_argument('--cpu-sets', nargs='+', help='One Docker CPU set per worker at the largest worker count')
     parser.add_argument('--memory-gib', type=int, default=16)
     parser.add_argument('--snapshot-mib', type=int, default=1024)
     parser.add_argument('--timeout', type=int, default=600)
@@ -291,4 +294,6 @@ if __name__ == '__main__':
     if min(*args.workers, args.trials, args.repeats, args.cpus, args.memory_gib,
            args.snapshot_mib, args.timeout, args.reserve_gib) <= 0 or args.repeats % 3:
         parser.error('counts must be positive and repeats must be divisible by three')
+    if args.cpu_sets is not None and len(args.cpu_sets) < max(args.workers):
+        parser.error('provide a CPU set for every worker at the largest worker count')
     asyncio.run(main(args))

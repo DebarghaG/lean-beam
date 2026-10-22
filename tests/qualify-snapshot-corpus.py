@@ -217,12 +217,18 @@ async def main(args):
 
         try:
             for task, row in selected:
+                if 'openError' in file_record:
+                    row['baseline'] = {'status': 'notRun', 'reason': 'Source file failed to open',
+                                       'unvisitedSteps': len(task['steps'])}
+                    checkpoint()
+                    continue
                 print('baseline', task['project'], task['theorem'], flush=True)
                 try:
                     await ensure_cluster()
                     await replay(cluster, task, args.tactics, row['baseline'], checkpoint)
                 except Exception as error:
                     row['baseline'].update(status='error', error=failure(error, 'open'))
+                    file_record['openError'] = row['baseline']['error']
                 print('baseline result', task['theorem'], row['baseline']['status'], flush=True)
                 checkpoint()
                 if row['baseline']['status'] == 'error' or row['baseline'].get('cleanupErrors'):
@@ -230,6 +236,11 @@ async def main(args):
             for task, row in selected:
                 if row['baseline']['status'] != 'passed':
                     row['migration'] = {'status': 'notRun', 'reason': 'Local proof chain did not pass'}
+                    checkpoint()
+                    continue
+                if 'receiverOpenError' in file_record:
+                    row['migration'] = {'status': 'notRun', 'reason': 'Receiver could not prepare this file',
+                                        'unvisitedSteps': len(task['steps'])}
                     checkpoint()
                     continue
                 print('migration', task['project'], task['theorem'], flush=True)
@@ -248,6 +259,7 @@ async def main(args):
                                  transfer_timeout=args.transfer_timeout)
                 except Exception as error:
                     row['migration'].update(status='error', error=failure(error, 'openReceiver'))
+                    file_record['receiverOpenError'] = row['migration']['error']
                 print('migration result', task['theorem'], row['migration']['status'], flush=True)
                 checkpoint()
                 if row['migration']['status'] == 'error' or row['migration'].get('cleanupErrors'):

@@ -42,11 +42,14 @@ def outcome(result):
 
 class Cluster:
     def __init__(self, project, runtime, workers=2, *, cpus=2, memory_gib=8,
-                 timeout=120, snapshot_mib=256, threads=4):
+                 timeout=120, snapshot_mib=256, threads=4, cpu_sets=None):
         self.project, self.runtime = project.resolve(), runtime.resolve()
         self.workers = workers
         self.cpus, self.memory_gib = cpus, memory_gib
         self.timeout, self.snapshot_mib, self.threads = timeout, snapshot_mib, threads
+        self.cpu_sets = cpu_sets
+        if cpu_sets is not None and len(cpu_sets) != workers:
+            raise ValueError('Provide one CPU set per worker')
         self.names, self.peers = [], []
         self.token = secrets.token_hex(32)
 
@@ -66,6 +69,8 @@ class Cluster:
                     "-p", "127.0.0.1::8765", "-e", "BEAM_POOL_TOKEN",
                     "-e", f"LEAN_NUM_THREADS={self.threads}",
                     "-e", "PATH=/opt/lean/bin:/usr/local/bin:/usr/bin:/bin"]
+            if self.cpu_sets is not None:
+                args += ["--cpuset-cpus", self.cpu_sets[index]]
             for key in ("LEAN_PATH", "LEAN_SRC_PATH", "LD_LIBRARY_PATH"):
                 value = mapped(environment.get(key, ""))
                 if key == "LD_LIBRARY_PATH":
