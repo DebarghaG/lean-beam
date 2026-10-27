@@ -181,12 +181,6 @@ private def backendFailureMessage
 private def sessionShutdownReplyTimeoutMs : Nat :=
   1000
 
-private def killCommand? : IO (Option System.FilePath) := do
-  for candidate in [System.FilePath.mk "/bin/kill", System.FilePath.mk "/usr/bin/kill"] do
-    if ← candidate.pathExists then
-      return some candidate
-  pure none
-
 private partial def waitForProcessExitWithTimeout
     (proc : IO.Process.Child brokerStdio)
     (timeoutMs : Nat)
@@ -217,17 +211,10 @@ private def terminateBackendProcess (proc : IO.Process.Child brokerStdio) : IO B
       proc.kill
     catch _ =>
       pure ()
-    unless ← waitForProcessExitWithTimeout proc sessionShutdownReplyTimeoutMs do
-      try
-        if let some kill := ← killCommand? then
-          let _ ← IO.Process.output {
-            cmd := kill.toString
-            args := #["-9", toString proc.pid.toNat]
-          }
-          pure ()
-      catch _ =>
-        pure ()
-      discard <| waitForProcessExitWithTimeout proc sessionShutdownReplyTimeoutMs
+    -- Child.kill already sends SIGKILL on the supported Lean runtime. An external kill retry
+    -- is redundant and calls Child.pid, whose consuming declaration in Lean 4.33 disagrees with
+    -- its borrowing runtime implementation, retaining the child and all three pipe handles.
+    discard <| waitForProcessExitWithTimeout proc sessionShutdownReplyTimeoutMs
   try
     pure (← proc.tryWait).isSome
   catch _ =>

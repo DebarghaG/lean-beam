@@ -192,6 +192,25 @@ class IntegrationTest(unittest.IsolatedAsyncioTestCase):
         return await self.native.call(name, {"workspace": {"root": str(self.root)},
                                             "path": "Proof.lean", **args})
 
+    @unittest.skipUnless(Path("/proc/self/fd").is_dir(), "requires Linux descriptor accounting")
+    async def test_workspace_cleanup_releases_backend_pipes(self):
+        # Keep the same MCP process alive across sessions, as a pool worker does. Each drop used
+        # to retain three pipe handles through the redundant forced-termination/PID lookup path.
+        workspace = {"workspace": {"root": str(self.root)}}
+        await self.native.call("lean_drop_workspace", workspace)
+        descriptors = Path(f"/proc/{self.native.proc.pid}/fd")
+        baseline = len(list(descriptors.iterdir()))
+        counts = []
+        for _ in range(8):
+            await self.call("lean_sync")
+            await self.native.call("lean_drop_workspace", workspace)
+            # The response reader finishes independently of the workspace-control response.
+            deadline = time.monotonic() + 3
+            while len(list(descriptors.iterdir())) > baseline and time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+            counts.append(len(list(descriptors.iterdir())))
+        self.assertLessEqual(max(counts), baseline, counts)
+
     async def root_handle(self):
         return (await self.call("lean_run_at_handle", version=self.version, line=3, character=2,
                                 text="constructor"))["next_handle"]
